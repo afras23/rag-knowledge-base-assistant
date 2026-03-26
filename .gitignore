@@ -1,1 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Mac
+.DS_Store
+
+# Env
 .env
+.venv/
+
+# Cursor
+.cursorrules
+
+# Migrations cache
+migrations/__pycache__/
+
+# Tests cache
+.pytest_cache/
+
+# Ruff / mypy
+.ruff_cache/
+.mypy_cache/
