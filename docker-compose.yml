@@ -14,6 +14,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      chromadb:
+        condition: service_healthy
     restart: unless-stopped
 
   db:
@@ -33,6 +35,20 @@ services:
       retries: 5
     restart: unless-stopped
 
+  chromadb:
+    image: chromadb/chroma:latest
+    ports:
+      - "${CHROMA_PORT:-8000}:8000"
+    volumes:
+      - chromadb_data:/chroma/chroma
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8000/api/v1/heartbeat > /dev/null || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
 volumes:
   pgdata:
+  chromadb_data:
 

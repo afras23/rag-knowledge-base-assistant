@@ -28,6 +28,11 @@ class Chunk(BaseModel):
     source_document: str = Field(..., description="Source document filename")
     page_or_section: str = Field(..., description="Anchor inherited from parser section metadata")
     chunk_index: int = Field(..., ge=0, description="0-based chunk index within the whole document")
+    doc_id: str | None = Field(default=None, description="Document UUID as string for indexing metadata")
+    document_title: str | None = Field(default=None, description="Human-friendly document title for citations")
+    collection_id: str | None = Field(default=None, description="Logical collection identifier")
+    restriction_level: str | None = Field(default=None, description="Restriction level for access control")
+    version_label: str | None = Field(default=None, description="Optional document version label")
 
 
 @dataclass(frozen=True)

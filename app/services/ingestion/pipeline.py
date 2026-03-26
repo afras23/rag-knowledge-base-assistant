@@ -23,9 +23,9 @@ from app.models.ingestion import IngestionEventStatus, IngestionJobStatus
 from app.repositories.document_repo import DocumentRepository
 from app.repositories.ingestion_repo import IngestionRepository
 from app.services.ingestion.chunker import Chunk, DocumentChunker
-from app.services.ingestion.embedder import DocumentEmbedder, EmbeddingResult
+from app.services.ingestion.embedder import EmbeddingResult
+from app.services.ingestion.indexer import IndexingService
 from app.services.ingestion.parsers import ParsedDocument, get_parser
-from app.services.vectorstore.chroma_client import ChromaClient
 
 logger = logging.getLogger(__name__)
 
@@ -59,8 +59,7 @@ class IngestionPipeline:
         ingestion_repo: IngestionRepository,
         document_repo: DocumentRepository,
         chunker: DocumentChunker,
-        embedder: DocumentEmbedder,
-        chroma_client: ChromaClient,
+        indexer: IndexingService,
     ) -> None:
         """
         Initialize ingestion orchestrator with explicit dependencies.
@@ -69,14 +68,12 @@ class IngestionPipeline:
             ingestion_repo: Repository for ingestion job/event tracking.
             document_repo: Repository for document metadata and idempotency checks.
             chunker: Chunking service.
-            embedder: Embedding service.
-            chroma_client: ChromaDB vector storage client.
+            indexer: Indexing service (embed + index into ChromaDB).
         """
         self._ingestion_repo = ingestion_repo
         self._document_repo = document_repo
         self._chunker = chunker
-        self._embedder = embedder
-        self._chroma_client = chroma_client
+        self._indexer = indexer
 
     async def ingest_documents(
         self,
@@ -230,11 +227,6 @@ class IngestionPipeline:
             return "skipped", existing_document.id
 
         chunk_list = self._chunker.chunk_document(parsed_document)
-        embeddings, embedding_result = await self._embedder.embed_chunks(chunk_list)
-
-        metadata_payload = self._build_metadata_payload(
-            parsed_document=parsed_document, embedding_result=embedding_result
-        )
         created_document = await self._document_repo.create_document(
             title=source_path.stem,
             file_format=detected_format,
@@ -243,16 +235,27 @@ class IngestionPipeline:
             content_hash=content_hash,
             version_label=None,
             supersedes_id=None,
-            metadata_json=metadata_payload,
+            metadata_json=self._build_metadata_payload(parsed_document=parsed_document, embedding_result=None),
             chunk_count=len(chunk_list),
         )
 
         try:
-            inserted_count = await self._chroma_client.add_documents(
-                collection_id=collection_id,
-                document_id=str(created_document.id),
-                chunks=chunk_list,
-                embeddings=embeddings,
+            indexable_chunks = [
+                chunk.model_copy(
+                    update={
+                        "doc_id": str(created_document.id),
+                        "document_title": created_document.title,
+                        "collection_id": collection_id,
+                        "restriction_level": restriction_level,
+                        "version_label": created_document.version_label,
+                    }
+                )
+                for chunk in chunk_list
+            ]
+            inserted_count = await self._indexer.index_chunks(
+                chunks=indexable_chunks,
+                collection_name=collection_id,
+                job_id=job_id,
             )
         except Exception as chroma_exc:  # noqa: BLE001
             # Ensure no partial success: if Chroma insertion fails, remove the DB record.
@@ -271,7 +274,7 @@ class IngestionPipeline:
             document_id=str(created_document.id),
             collection_id=collection_id,
             chunks=chunk_list,
-            embeddings=embeddings,
+            embeddings=[],
         )
         logger.info(
             "Prepared and stored document vectors",
@@ -280,7 +283,6 @@ class IngestionPipeline:
                 "document_id": str(created_document.id),
                 "collection_id": collection_id,
                 "chunk_count": len(chunk_list),
-                "embedded_chunks": embedding_result.embedded_chunks,
                 "inserted_vector_count": inserted_count,
             },
         )
@@ -339,18 +341,21 @@ class IngestionPipeline:
 
     @staticmethod
     def _build_metadata_payload(
-        parsed_document: ParsedDocument, embedding_result: EmbeddingResult
+        parsed_document: ParsedDocument, embedding_result: EmbeddingResult | None
     ) -> dict[str, object]:
         """Build metadata JSON for persisted document records."""
+        embedding_payload: dict[str, object] | None = None
+        if embedding_result is not None:
+            embedding_payload = {
+                "total_chunks": embedding_result.total_chunks,
+                "embedded_chunks": embedding_result.embedded_chunks,
+                "failed_chunks": embedding_result.failed_chunks,
+                "total_cost": embedding_result.total_cost,
+            }
         return {
             "filename": parsed_document.metadata.filename,
             "format": parsed_document.metadata.format,
             "page_count": parsed_document.metadata.page_count,
             "section_count": len(parsed_document.sections),
-            "embedding": {
-                "total_chunks": embedding_result.total_chunks,
-                "embedded_chunks": embedding_result.embedded_chunks,
-                "failed_chunks": embedding_result.failed_chunks,
-                "total_cost": embedding_result.total_cost,
-            },
+            "embedding": embedding_payload,
         }

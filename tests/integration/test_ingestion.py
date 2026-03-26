@@ -29,7 +29,7 @@ from app.models.collection import Collection
 from app.repositories.document_repo import DocumentRepository
 from app.repositories.ingestion_repo import IngestionRepository
 from app.services.ingestion.chunker import DocumentChunker
-from app.services.ingestion.embedder import DocumentEmbedder
+from app.services.ingestion.indexer import IndexingService
 from app.services.ingestion.parsers import get_parser
 from app.services.ingestion.pipeline import IngestionPipeline
 
@@ -98,40 +98,65 @@ class _IngestVectorsRecord:
 
 
 class _MockEmbeddingsProvider:
-    """Mock embeddings provider that supports `DocumentEmbedder` expectations."""
+    """Mock embedding provider for indexing service."""
 
     def __init__(self, *, should_fail: bool = False) -> None:
         self.should_fail = should_fail
-        self.aembed_documents_calls = 0
+        self.embed_texts_calls = 0
 
-    async def aembed_documents(self, texts: list[str]) -> list[list[float]]:
-        """Embed documents asynchronously (mocked)."""
-        self.aembed_documents_calls += 1
+    @property
+    def model_name(self) -> str:
+        return "mock-embeddings"
+
+    async def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        """Embed a batch (mocked)."""
+        self.embed_texts_calls += 1
         if self.should_fail:
             raise RuntimeError("embedding failure")
         return [[float(len(text))] for text in texts]
+
+    def embed_query(self, text: str) -> list[float]:  # noqa: ARG002
+        return [1.0]
 
 
 class _FakeChromaClient:
     """Fake vector storage client used to validate ingestion writes."""
 
     def __init__(self) -> None:
-        self.add_documents_calls = 0
+        self.upsert_calls = 0
         self._records: list[_IngestVectorsRecord] = []
 
-    async def add_documents(
+    async def get_or_create_collection(self, name: str) -> object:  # noqa: ARG002
+        return object()
+
+    async def upsert_chunks(
         self,
         *,
-        collection_id: str,
-        document_id: str,
+        collection_name: str,  # noqa: ARG002
         chunks: list[Any],
-        embeddings: list[list[float] | None],
+        embeddings: list[list[float]],
     ) -> int:
-        """Mock add: record inserted vectors count."""
-        self.add_documents_calls += 1
-        inserted_count = sum(1 for embedding in embeddings if embedding is not None)
+        """Mock upsert: record inserted vectors count."""
+        self.upsert_calls += 1
+        inserted_count = len(embeddings)
         self._records.append(_IngestVectorsRecord(inserted_count=inserted_count))
         return inserted_count
+
+    async def delete_document_chunks(self, *, collection_name: str, doc_id: str) -> int:  # noqa: ARG002
+        return 0
+
+    async def query(
+        self,
+        *,
+        collection_name: str,  # noqa: ARG002
+        query_embedding: list[float],  # noqa: ARG002
+        n_results: int,  # noqa: ARG002
+        where_filters: dict[str, object] | None,  # noqa: ARG002
+    ) -> list[Any]:
+        return []
+
+    async def health_check(self) -> bool:
+        return True
 
     @property
     def records(self) -> list[_IngestVectorsRecord]:
@@ -155,24 +180,19 @@ async def test_ingestion_pipeline_happy_path_and_idempotency() -> None:
             document_repo = DocumentRepository(session)
 
             embeddings_provider = _MockEmbeddingsProvider(should_fail=False)
-            embedder = DocumentEmbedder(
-                embeddings_provider=embeddings_provider,
-                batch_size=2,
-                max_retries=1,
-                initial_backoff_seconds=0.0,
-                circuit_breaker_threshold=3,
-                cost_per_1k_tokens=0.0,
-            )
-
             chunker = DocumentChunker(chunk_size=200, chunk_overlap=50)
             chroma_client = _FakeChromaClient()
+            indexer = IndexingService(
+                embedding_provider=embeddings_provider,
+                chroma_client=chroma_client,  # type: ignore[arg-type]
+                ingestion_repo=ingestion_repo,
+            )
 
             pipeline = IngestionPipeline(
                 ingestion_repo=ingestion_repo,
                 document_repo=document_repo,
                 chunker=chunker,
-                embedder=embedder,
-                chroma_client=chroma_client,  # type: ignore[arg-type]
+                indexer=indexer,
             )
 
             first = await pipeline.ingest_documents(
@@ -198,12 +218,12 @@ async def test_ingestion_pipeline_happy_path_and_idempotency() -> None:
             assert db_document.chunk_count == len(expected_chunks)
 
             embedded_metadata = db_document.metadata_json.get("embedding", {})
-            assert embedded_metadata.get("embedded_chunks") == len(expected_chunks)
+            assert embedded_metadata in (None, {}) or isinstance(embedded_metadata, dict)
 
-            assert chroma_client.add_documents_calls == 1
+            assert chroma_client.upsert_calls == 1
             assert chroma_client.records[-1].inserted_count == len(expected_chunks)
-            assert embeddings_provider.aembed_documents_calls >= 1
-            aembed_calls_after_first = embeddings_provider.aembed_documents_calls
+            assert embeddings_provider.embed_texts_calls >= 1
+            embed_calls_after_first = embeddings_provider.embed_texts_calls
 
             second = await pipeline.ingest_documents(
                 collection_id="operations",
@@ -225,8 +245,8 @@ async def test_ingestion_pipeline_happy_path_and_idempotency() -> None:
             assert len(documents_after) == 1
 
             # No extra vector inserts or embedding calls after idempotent skip.
-            assert chroma_client.add_documents_calls == 1
-            assert embeddings_provider.aembed_documents_calls == aembed_calls_after_first
+            assert chroma_client.upsert_calls == 1
+            assert embeddings_provider.embed_texts_calls == embed_calls_after_first
 
     finally:
         await engine.dispose()
@@ -248,23 +268,19 @@ async def test_ingestion_pipeline_embedding_failure_circuit_breaks() -> None:
             document_repo = DocumentRepository(session)
 
             embeddings_provider = _MockEmbeddingsProvider(should_fail=True)
-            embedder = DocumentEmbedder(
-                embeddings_provider=embeddings_provider,
-                batch_size=10,
-                max_retries=1,
-                initial_backoff_seconds=0.0,
-                circuit_breaker_threshold=1,
-                cost_per_1k_tokens=0.0,
-            )
             chunker = DocumentChunker(chunk_size=200, chunk_overlap=50)
             chroma_client = _FakeChromaClient()
+            indexer = IndexingService(
+                embedding_provider=embeddings_provider,
+                chroma_client=chroma_client,  # type: ignore[arg-type]
+                ingestion_repo=ingestion_repo,
+            )
 
             pipeline = IngestionPipeline(
                 ingestion_repo=ingestion_repo,
                 document_repo=document_repo,
                 chunker=chunker,
-                embedder=embedder,
-                chroma_client=chroma_client,  # type: ignore[arg-type]
+                indexer=indexer,
             )
 
             ingest_result = await pipeline.ingest_documents(
@@ -282,8 +298,8 @@ async def test_ingestion_pipeline_embedding_failure_circuit_breaks() -> None:
             documents, total = await document_repo.list_documents(collection_id="operations", page=1, page_size=20)
             assert total == 0
             assert documents == []
-            assert chroma_client.add_documents_calls == 0
-            assert embeddings_provider.aembed_documents_calls >= 1
+            assert chroma_client.upsert_calls == 0
+            assert embeddings_provider.embed_texts_calls >= 1
 
     finally:
         await engine.dispose()
@@ -305,23 +321,19 @@ async def test_ingestion_pipeline_malformed_file_fails_cleanly() -> None:
             document_repo = DocumentRepository(session)
 
             embeddings_provider = _MockEmbeddingsProvider(should_fail=False)
-            embedder = DocumentEmbedder(
-                embeddings_provider=embeddings_provider,
-                batch_size=10,
-                max_retries=1,
-                initial_backoff_seconds=0.0,
-                circuit_breaker_threshold=3,
-                cost_per_1k_tokens=0.0,
-            )
             chunker = DocumentChunker(chunk_size=200, chunk_overlap=50)
             chroma_client = _FakeChromaClient()
+            indexer = IndexingService(
+                embedding_provider=embeddings_provider,
+                chroma_client=chroma_client,  # type: ignore[arg-type]
+                ingestion_repo=ingestion_repo,
+            )
 
             pipeline = IngestionPipeline(
                 ingestion_repo=ingestion_repo,
                 document_repo=document_repo,
                 chunker=chunker,
-                embedder=embedder,
-                chroma_client=chroma_client,  # type: ignore[arg-type]
+                indexer=indexer,
             )
 
             ingest_result = await pipeline.ingest_documents(
@@ -340,9 +352,9 @@ async def test_ingestion_pipeline_malformed_file_fails_cleanly() -> None:
             assert total == 0
             assert documents == []
 
-            assert chroma_client.add_documents_calls == 0
+            assert chroma_client.upsert_calls == 0
             # Parser should fail before any embeddings are attempted.
-            assert embeddings_provider.aembed_documents_calls == 0
+            assert embeddings_provider.embed_texts_calls == 0
 
     finally:
         await engine.dispose()

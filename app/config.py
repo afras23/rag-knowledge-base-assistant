@@ -48,6 +48,15 @@ class Settings(BaseSettings):
         default=5, description="Consecutive failed embedding batches before aborting (circuit breaker)"
     )
 
+    embedding_provider: Literal["local", "openai"] = Field(
+        default="local",
+        description="Embedding provider switch: local (sentence-transformers) or openai (langchain-openai).",
+    )
+    openai_api_key: str = Field(
+        default="",
+        description="OpenAI API key (required when embedding_provider=openai).",
+    )
+
     chroma_persist_directory: str = Field(
         default="./.chroma",
         description="Local filesystem directory for persistent ChromaDB data",
@@ -56,6 +65,8 @@ class Settings(BaseSettings):
         default="",
         description="Optional prefix applied to all Chroma collection names",
     )
+    chroma_host: str = Field(default="chromadb", description="ChromaDB host (docker-compose service name by default)")
+    chroma_port: int = Field(default=8000, ge=1, le=65535, description="ChromaDB port")
 
     cors_allow_origins: str = Field(
         default="",

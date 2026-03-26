@@ -30,9 +30,10 @@ from app.core.exceptions import IngestionError
 from app.repositories.document_repo import DocumentRepository
 from app.repositories.ingestion_repo import IngestionRepository
 from app.services.ingestion.chunker import DocumentChunker
-from app.services.ingestion.embedder import DocumentEmbedder
+from app.services.ingestion.embedder import get_embedding_provider
+from app.services.ingestion.indexer import IndexingService
 from app.services.ingestion.pipeline import IngestionPipeline
-from app.services.vectorstore.chroma_client import ChromaClient
+from app.services.vectorstore.chroma_client import ChromaClient, ChromaClientWrapper
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +55,12 @@ async def _get_document_repo(session: AsyncSession = Depends(_db_session)) -> Do
     return DocumentRepository(session)
 
 
+def _get_chroma_wrapper() -> ChromaClientWrapper:
+    return ChromaClientWrapper()
+
+
 def _get_chroma_client() -> ChromaClient:
+    """Backwards-compatible client for admin delete endpoint."""
     return ChromaClient()
 
 
@@ -62,14 +68,18 @@ def _get_pipeline(
     *,
     ingestion_repo: IngestionRepository = Depends(_get_ingestion_repo),
     document_repo: DocumentRepository = Depends(_get_document_repo),
-    chroma_client: ChromaClient = Depends(_get_chroma_client),
+    chroma_wrapper: ChromaClientWrapper = Depends(_get_chroma_wrapper),
 ) -> IngestionPipeline:
+    indexing_service = IndexingService(
+        embedding_provider=get_embedding_provider(),
+        chroma_client=chroma_wrapper,
+        ingestion_repo=ingestion_repo,
+    )
     return IngestionPipeline(
         ingestion_repo=ingestion_repo,
         document_repo=document_repo,
         chunker=DocumentChunker(),
-        embedder=DocumentEmbedder(),
-        chroma_client=chroma_client,
+        indexer=indexing_service,
     )
 
 
