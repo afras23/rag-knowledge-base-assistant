@@ -3,5 +3,9 @@ uvicorn[standard]
 pydantic-settings
 sqlalchemy
 asyncpg
+chromadb
+langchain-openai
+langchain-core
+python-multipart
 greenlet
 

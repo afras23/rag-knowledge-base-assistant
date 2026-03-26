@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 class IngestionResult(BaseModel):
     """Summary of a multi-document ingestion run."""
 
+    job_id: UUID = Field(..., description="Ingestion job identifier")
     total_documents: int = Field(..., ge=0, description="Total input documents discovered")
     processed: int = Field(..., ge=0, description="Documents processed (including skipped)")
     failed: int = Field(..., ge=0, description="Documents that failed during orchestration")
@@ -194,7 +195,13 @@ class IngestionPipeline:
                 "skipped": skipped,
             },
         )
-        return IngestionResult(total_documents=total_documents, processed=processed, failed=failed, skipped=skipped)
+        return IngestionResult(
+            job_id=ingestion_job.id,
+            total_documents=total_documents,
+            processed=processed,
+            failed=failed,
+            skipped=skipped,
+        )
 
     async def _ingest_single_document(
         self,

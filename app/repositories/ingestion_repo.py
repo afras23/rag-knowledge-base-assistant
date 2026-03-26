@@ -8,7 +8,7 @@ import logging
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.ingestion import (
@@ -127,3 +127,37 @@ class IngestionRepository(BaseRepository):
         if db_job is None:
             raise LookupError(f"Ingestion job not found: {job_id}")
         return db_job
+
+    async def list_job_events(
+        self,
+        *,
+        job_id: UUID,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[IngestionEvent], int]:
+        """
+        List ingestion events for a job with pagination.
+
+        Args:
+            job_id: Ingestion job UUID.
+            page: 1-indexed page number.
+            page_size: Number of items per page.
+
+        Returns:
+            (events, total_count)
+        """
+        offset = (page - 1) * page_size
+        count_query = select(func.count()).select_from(IngestionEvent).where(IngestionEvent.job_id == job_id)
+        total_result = await self.db_session.execute(count_query)
+        total_count = int(total_result.scalar_one())
+
+        query = (
+            select(IngestionEvent)
+            .where(IngestionEvent.job_id == job_id)
+            .order_by(IngestionEvent.created_at.desc())
+            .offset(offset)
+            .limit(page_size)
+        )
+        events_result = await self.db_session.execute(query)
+        events = list(events_result.scalars().all())
+        return events, total_count

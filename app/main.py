@@ -121,6 +121,10 @@ def create_app() -> FastAPI:
 
     app.include_router(health_router, prefix=settings.api_prefix)
 
+    from app.api.routes.admin import router as admin_router
+
+    app.include_router(admin_router, prefix=settings.api_prefix)
+
     return app
 
 
