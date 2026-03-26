@@ -11,19 +11,13 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from app.config import settings
+from app.core.database import engine
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-# Create engine at module scope to avoid repeatedly constructing it per request.
-_async_engine: AsyncEngine = create_async_engine(
-    settings.database_url,
-    pool_pre_ping=True,
-)
 
 
 @router.get("/health")
@@ -43,7 +37,7 @@ async def health() -> JSONResponse:
 async def readiness() -> JSONResponse:
     """Readiness check: verifies database connectivity."""
     try:
-        async with _async_engine.connect() as connection:
+        async with engine.connect() as connection:
             await connection.execute(text("SELECT 1"))
         return JSONResponse(
             status_code=200,

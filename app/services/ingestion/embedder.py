@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import math
+import random
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
@@ -21,10 +22,6 @@ from app.services.ingestion.chunker import Chunk
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_EMBED_BATCH_SIZE = 32
-DEFAULT_MAX_RETRIES = 3
-DEFAULT_INITIAL_BACKOFF_SECONDS = 0.5
-DEFAULT_CIRCUIT_BREAKER_THRESHOLD = 3
 DEFAULT_EMBED_COST_PER_1K_TOKENS = 0.00002
 CHARS_PER_TOKEN_ESTIMATE = 4
 
@@ -85,13 +82,14 @@ class DocumentEmbedder:
             cost_per_1k_tokens: Estimated USD cost per 1k input tokens.
         """
         self._config = EmbedderConfig(
-            batch_size=batch_size or int(getattr(settings, "embed_batch_size", DEFAULT_EMBED_BATCH_SIZE)),
-            max_retries=max_retries or int(getattr(settings, "embed_max_retries", DEFAULT_MAX_RETRIES)),
+            batch_size=int(batch_size) if batch_size is not None else settings.embed_batch_size,
+            max_retries=int(max_retries) if max_retries is not None else settings.embed_max_retries,
             initial_backoff_seconds=initial_backoff_seconds
             if initial_backoff_seconds is not None
-            else float(getattr(settings, "embed_initial_backoff_seconds", DEFAULT_INITIAL_BACKOFF_SECONDS)),
+            else float(settings.embed_initial_backoff_seconds),
             circuit_breaker_threshold=circuit_breaker_threshold
-            or int(getattr(settings, "embed_circuit_breaker_threshold", DEFAULT_CIRCUIT_BREAKER_THRESHOLD)),
+            if circuit_breaker_threshold is not None
+            else int(settings.embed_circuit_breaker_threshold),
             cost_per_1k_tokens=cost_per_1k_tokens
             if cost_per_1k_tokens is not None
             else float(getattr(settings, "embed_cost_per_1k_tokens", DEFAULT_EMBED_COST_PER_1K_TOKENS)),
@@ -227,7 +225,7 @@ class DocumentEmbedder:
                 if (not is_transient) or attempt == self._config.max_retries:
                     break
 
-                backoff_seconds = self._config.initial_backoff_seconds * (2 ** (attempt - 1))
+                backoff_seconds = self._config.initial_backoff_seconds * (2**attempt) * random.uniform(0.8, 1.2)
                 logger.warning(
                     "Embedding batch retry scheduled",
                     extra={

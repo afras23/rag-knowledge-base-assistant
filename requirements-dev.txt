@@ -1,7 +1,7 @@
-ruff
-mypy
-pytest
-httpx
-alembic
-pytest-anyio
+ruff==0.15.6
+mypy==1.19.1
+pytest==9.0.2
+httpx==0.28.1
+alembic==1.18.4
+pytest-anyio==0.0.0
 

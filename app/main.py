@@ -17,6 +17,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
 from app.config import settings
+from app.core.database import engine
 from app.core.exceptions import BaseAppError
 from app.core.logging_config import configure_root_logger
 
@@ -78,6 +79,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         extra={"app_env": settings.app_env, "version": settings.app_version},
     )
     yield
+    await engine.dispose()
     logger.info(
         "Application shutting down",
         extra={"app_env": settings.app_env, "version": settings.app_version},

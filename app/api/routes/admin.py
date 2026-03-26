@@ -18,14 +18,14 @@ from uuid import UUID
 import anyio
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.schemas.admin import (
     IngestionEventResponse,
     IngestionJobResponse,
 )
 from app.api.schemas.common import PaginatedResponse
-from app.config import settings
+from app.core.database import async_session_factory
 from app.core.exceptions import IngestionError
 from app.repositories.document_repo import DocumentRepository
 from app.repositories.ingestion_repo import IngestionRepository
@@ -42,13 +42,8 @@ router = APIRouter()
 @asynccontextmanager
 async def _db_session() -> AsyncIterator[AsyncSession]:
     """Create an async DB session for a single request."""
-    engine = create_async_engine(settings.database_url, pool_pre_ping=True)
-    session_factory = async_sessionmaker(engine, expire_on_commit=False)
-    try:
-        async with session_factory() as session:
-            yield session
-    finally:
-        await engine.dispose()
+    async with async_session_factory() as session:
+        yield session
 
 
 async def _get_ingestion_repo(session: AsyncSession = Depends(_db_session)) -> IngestionRepository:

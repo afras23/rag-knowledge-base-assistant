@@ -106,6 +106,18 @@ class MarkdownParser(DocumentParser):
     """Parser for Markdown files, splitting by `#` headings."""
 
     async def parse_path(self, source_path: Path) -> ParsedDocument:
+        """
+        Parse a Markdown file from disk and split into heading-based sections.
+
+        Args:
+            source_path: Path to the Markdown file.
+
+        Returns:
+            ParsedDocument containing normalized text and section anchors.
+
+        Raises:
+            ExtractionError: If the file cannot be read or contains no usable text.
+        """
         start_time = time.perf_counter()
         filename = _safe_filename(source_path)
 
@@ -132,7 +144,7 @@ class MarkdownParser(DocumentParser):
         logger.info(
             "Parsed markdown document",
             extra={
-                "filename": filename,
+                "source_filename": filename,
                 "format": "markdown",
                 "page_count": 0,
                 "section_count": len(sections),
@@ -201,6 +213,18 @@ class PdfParser(DocumentParser):
     """Parser for PDF files using pdfplumber, extracting text per page with anchors."""
 
     async def parse_path(self, source_path: Path) -> ParsedDocument:
+        """
+        Parse a PDF file from disk and extract text per page.
+
+        Args:
+            source_path: Path to the PDF file.
+
+        Returns:
+            ParsedDocument containing normalized extracted text and per-page anchors.
+
+        Raises:
+            ExtractionError: If pdfplumber is missing, the file cannot be read, or no text is extracted.
+        """
         start_time = time.perf_counter()
         filename = _safe_filename(source_path)
 
@@ -225,7 +249,12 @@ class PdfParser(DocumentParser):
                     except Exception as page_exc:  # noqa: BLE001
                         logger.warning(
                             "PDF page extraction failed; skipping page",
-                            extra={"filename": filename, "format": "pdf", "page_number": idx, "error": str(page_exc)},
+                            extra={
+                                "source_filename": filename,
+                                "format": "pdf",
+                                "page_number": idx,
+                                "error": str(page_exc),
+                            },
                         )
                         continue
 
@@ -271,7 +300,7 @@ class PdfParser(DocumentParser):
         logger.info(
             "Parsed PDF document",
             extra={
-                "filename": filename,
+                "source_filename": filename,
                 "format": "pdf",
                 "page_count": page_count,
                 "section_count": len(sections),
@@ -290,6 +319,18 @@ class DocxParser(DocumentParser):
     """Parser for DOCX files using python-docx, extracting headings as section boundaries."""
 
     async def parse_path(self, source_path: Path) -> ParsedDocument:
+        """
+        Parse a DOCX file from disk and split by heading-style paragraphs.
+
+        Args:
+            source_path: Path to the DOCX file.
+
+        Returns:
+            ParsedDocument containing normalized extracted text and heading anchors.
+
+        Raises:
+            ExtractionError: If python-docx is missing, the file cannot be read, or no text is extracted.
+        """
         start_time = time.perf_counter()
         filename = _safe_filename(source_path)
 
@@ -383,7 +424,7 @@ class DocxParser(DocumentParser):
         logger.info(
             "Parsed DOCX document",
             extra={
-                "filename": filename,
+                "source_filename": filename,
                 "format": "docx",
                 "page_count": 0,
                 "section_count": len(sections),

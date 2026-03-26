@@ -1,11 +1,11 @@
-fastapi
-uvicorn[standard]
-pydantic-settings
-sqlalchemy
-asyncpg
-chromadb
-langchain-openai
-langchain-core
-python-multipart
-greenlet
+fastapi==0.135.1
+uvicorn[standard]==0.42.0
+pydantic-settings==2.13.1
+sqlalchemy==2.0.48
+asyncpg==0.31.0
+chromadb==1.5.5
+langchain-openai==1.1.12
+langchain-core==1.2.22
+python-multipart==0.0.22
+greenlet==3.3.2
 

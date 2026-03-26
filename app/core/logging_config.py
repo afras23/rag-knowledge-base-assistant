@@ -20,6 +20,15 @@ class JsonCorrelationFormatter(logging.Formatter):
     """Format log records as JSON including correlation_id."""
 
     def format(self, record: logging.LogRecord) -> str:  # noqa: A003
+        """
+        Format a log record as a single-line JSON payload.
+
+        Args:
+            record: Log record emitted by the stdlib logging system.
+
+        Returns:
+            JSON string containing base fields, correlation_id, and any extra attributes.
+        """
         # Base fields.
         log_payload: dict[str, Any] = {
             "timestamp": datetime.now(timezone.utc).isoformat(),

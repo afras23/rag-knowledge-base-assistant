@@ -36,6 +36,18 @@ class Settings(BaseSettings):
         description="Async SQLAlchemy database URL (postgresql+asyncpg://...)",
     )
 
+    chunk_size: int = Field(default=1000, description="Maximum characters per ingestion chunk")
+    chunk_overlap: int = Field(default=200, description="Character overlap between adjacent ingestion chunks")
+
+    embed_batch_size: int = Field(default=100, description="Number of chunks to embed per batch")
+    embed_max_retries: int = Field(default=3, description="Maximum retries per transient embedding batch failure")
+    embed_initial_backoff_seconds: float = Field(
+        default=1.0, description="Initial backoff seconds for embedding retries (exponential with jitter)"
+    )
+    embed_circuit_breaker_threshold: int = Field(
+        default=5, description="Consecutive failed embedding batches before aborting (circuit breaker)"
+    )
+
     chroma_persist_directory: str = Field(
         default="./.chroma",
         description="Local filesystem directory for persistent ChromaDB data",

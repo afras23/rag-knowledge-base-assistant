@@ -18,9 +18,6 @@ from app.services.ingestion.parsers import ParsedDocument
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_CHUNK_SIZE = 1000
-DEFAULT_CHUNK_OVERLAP = 200
-
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
 
 
@@ -57,8 +54,8 @@ class DocumentChunker:
             chunk_size: Maximum characters per chunk.
             chunk_overlap: Character overlap between adjacent chunks.
         """
-        configured_chunk_size = chunk_size or int(getattr(settings, "chunk_size", DEFAULT_CHUNK_SIZE))
-        configured_chunk_overlap = chunk_overlap or int(getattr(settings, "chunk_overlap", DEFAULT_CHUNK_OVERLAP))
+        configured_chunk_size = int(chunk_size) if chunk_size is not None else settings.chunk_size
+        configured_chunk_overlap = int(chunk_overlap) if chunk_overlap is not None else settings.chunk_overlap
 
         if configured_chunk_size <= 0:
             raise ValueError("chunk_size must be > 0")
@@ -110,7 +107,7 @@ class DocumentChunker:
         logger.info(
             "Chunked parsed document",
             extra={
-                "filename": parsed_document.metadata.filename,
+                "source_filename": parsed_document.metadata.filename,
                 "format": parsed_document.metadata.format,
                 "section_count": len(parsed_document.sections),
                 "chunk_count": len(chunk_list),
