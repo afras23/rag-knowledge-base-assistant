@@ -36,6 +36,15 @@ class Settings(BaseSettings):
         description="Async SQLAlchemy database URL (postgresql+asyncpg://...)",
     )
 
+    chroma_persist_directory: str = Field(
+        default="./.chroma",
+        description="Local filesystem directory for persistent ChromaDB data",
+    )
+    chroma_collection_prefix: str = Field(
+        default="",
+        description="Optional prefix applied to all Chroma collection names",
+    )
+
     cors_allow_origins: str = Field(
         default="",
         description="Comma-separated list of allowed CORS origins",

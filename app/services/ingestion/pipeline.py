@@ -25,6 +25,7 @@ from app.repositories.ingestion_repo import IngestionRepository
 from app.services.ingestion.chunker import Chunk, DocumentChunker
 from app.services.ingestion.embedder import DocumentEmbedder, EmbeddingResult
 from app.services.ingestion.parsers import ParsedDocument, get_parser
+from app.services.vectorstore.chroma_client import ChromaClient
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,7 @@ class IngestionPipeline:
         document_repo: DocumentRepository,
         chunker: DocumentChunker,
         embedder: DocumentEmbedder,
+        chroma_client: ChromaClient,
     ) -> None:
         """
         Initialize ingestion orchestrator with explicit dependencies.
@@ -67,11 +69,13 @@ class IngestionPipeline:
             document_repo: Repository for document metadata and idempotency checks.
             chunker: Chunking service.
             embedder: Embedding service.
+            chroma_client: ChromaDB vector storage client.
         """
         self._ingestion_repo = ingestion_repo
         self._document_repo = document_repo
         self._chunker = chunker
         self._embedder = embedder
+        self._chroma_client = chroma_client
 
     async def ingest_documents(
         self,
@@ -236,6 +240,26 @@ class IngestionPipeline:
             chunk_count=len(chunk_list),
         )
 
+        try:
+            inserted_count = await self._chroma_client.add_documents(
+                collection_id=collection_id,
+                document_id=str(created_document.id),
+                chunks=chunk_list,
+                embeddings=embeddings,
+            )
+        except Exception as chroma_exc:  # noqa: BLE001
+            # Ensure no partial success: if Chroma insertion fails, remove the DB record.
+            await self._document_repo.delete_document(created_document.id)
+            raise IngestionError(
+                "Failed to store document vectors in Chroma; document creation rolled back",
+                context={
+                    "document_id": str(created_document.id),
+                    "collection_id": collection_id,
+                    "source_path": str(source_path),
+                    "error": str(chroma_exc),
+                },
+            ) from chroma_exc
+
         _prepared_payload = PreparedStoragePayload(
             document_id=str(created_document.id),
             collection_id=collection_id,
@@ -243,13 +267,14 @@ class IngestionPipeline:
             embeddings=embeddings,
         )
         logger.info(
-            "Prepared document for downstream storage",
+            "Prepared and stored document vectors",
             extra={
                 "job_id": str(job_id),
                 "document_id": str(created_document.id),
                 "collection_id": collection_id,
                 "chunk_count": len(chunk_list),
                 "embedded_chunks": embedding_result.embedded_chunks,
+                "inserted_vector_count": inserted_count,
             },
         )
         return "ingested", created_document.id
