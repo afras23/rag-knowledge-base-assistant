@@ -9,11 +9,10 @@ from __future__ import annotations
 import json
 import logging
 import sys
-from contextvars import ContextVar
 from datetime import datetime, timezone
 from typing import Any
 
-correlation_id_ctx: ContextVar[str] = ContextVar("correlation_id", default="")
+from app.core.middleware.correlation import correlation_id_ctx
 
 
 class JsonCorrelationFormatter(logging.Formatter):
@@ -38,7 +37,7 @@ class JsonCorrelationFormatter(logging.Formatter):
         }
 
         correlation_id = correlation_id_ctx.get()
-        if correlation_id:
+        if correlation_id is not None and correlation_id != "":
             log_payload["correlation_id"] = correlation_id
 
         # Include any `extra` fields. In stdlib logging, values from extra become

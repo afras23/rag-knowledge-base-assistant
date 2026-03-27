@@ -21,7 +21,7 @@ from app.config import settings
 from app.core.database import engine
 from app.core.exceptions import BaseAppError
 from app.core.logging_config import configure_root_logger
-from app.middleware.correlation import CorrelationIdMiddleware
+from app.core.middleware import CorrelationIdMiddleware, RequestLoggingMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +120,7 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     app.add_middleware(BasicErrorHandlerMiddleware)
+    app.add_middleware(RequestLoggingMiddleware)
     app.add_middleware(CorrelationIdMiddleware)
 
     @app.exception_handler(HTTPException)

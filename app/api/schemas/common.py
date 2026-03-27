@@ -70,16 +70,38 @@ class PaginatedResponse(BaseModel, Generic[TItem]):
     )
 
 
+class TopQueryItem(BaseModel):
+    """Aggregated popularity for a hashed question."""
+
+    question_hash: str = Field(..., description="SHA-256 hash of the normalized question text")
+    query_count: int = Field(..., ge=0, description="Number of queries with this hash in the window")
+    refusal_count: int = Field(..., ge=0, description="Refused queries among those with this hash")
+
+
 class MetricsResponse(BaseModel):
     """Operational and business metrics exposed by the service."""
 
     queries_today: int = Field(..., ge=0, description="Number of chat queries processed today")
     refusals_today: int = Field(..., ge=0, description="Number of refused queries today (UTC day)")
     avg_latency_ms: float = Field(..., ge=0, description="Average query latency in milliseconds")
-    cost_today_usd: float = Field(..., ge=0, description="Total AI cost today in USD")
-    cost_limit_usd: float = Field(..., gt=0, description="Configured daily cost limit in USD")
+    cost_today_usd: float = Field(..., ge=0, description="Total AI cost today in USD (query_events)")
+    cost_limit_usd: float = Field(..., ge=0, description="Configured daily cost limit in USD")
+    cost_utilisation_pct: float = Field(
+        ...,
+        ge=0.0,
+        le=100.0,
+        description="cost_today_usd / cost_limit_usd as a percentage (0 when limit is 0)",
+    )
     documents_indexed: int = Field(..., ge=0, description="Number of documents fully indexed")
     active_collections: int = Field(..., ge=0, description="Collections with at least one indexed document")
+    top_queries: list[TopQueryItem] = Field(
+        default_factory=list,
+        description="Most frequent question hashes for the current UTC day",
+    )
+    refusal_breakdown: dict[str, int] = Field(
+        default_factory=dict,
+        description="Counts of refused queries by refusal_reason for the UTC day",
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -90,8 +112,11 @@ class MetricsResponse(BaseModel):
                     "avg_latency_ms": 842.3,
                     "cost_today_usd": 4.21,
                     "cost_limit_usd": 50.0,
+                    "cost_utilisation_pct": 8.42,
                     "documents_indexed": 612,
                     "active_collections": 8,
+                    "top_queries": [],
+                    "refusal_breakdown": {},
                 }
             ]
         }

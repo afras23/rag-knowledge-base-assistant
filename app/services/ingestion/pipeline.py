@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 from app.ai.pii_detector import PiiDetector
 from app.config import Settings
 from app.core.exceptions import IngestionError
+from app.core.observability.tracing import maybe_trace
 from app.models.ingestion import IngestionEventStatus, IngestionJobStatus
 from app.repositories.document_repo import DocumentRepository
 from app.repositories.ingestion_repo import IngestionRepository
@@ -81,6 +82,7 @@ class IngestionPipeline:
         self._settings = settings
         self._pii = PiiDetector(settings)
 
+    @maybe_trace("ingest_documents")
     async def ingest_documents(
         self,
         *,

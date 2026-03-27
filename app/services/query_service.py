@@ -14,6 +14,7 @@ from app.ai.pii_detector import PiiDetector, PiiScanResult
 from app.api.schemas.chat import ChatQueryRequest, ChatQueryResponse, CitationSchema
 from app.config import Settings
 from app.core.exceptions import ConversationNotFoundError
+from app.core.observability.tracing import maybe_trace
 from app.models.conversation import ConversationRole
 from app.repositories.collection_repo import CollectionRepository
 from app.repositories.conversation_repo import ConversationRepository
@@ -78,6 +79,7 @@ class QueryService:
         self._collections = collection_repo
         self._queries = query_repo
 
+    @maybe_trace("query")
     async def query(
         self,
         request: ChatQueryRequest,

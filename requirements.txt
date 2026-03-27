@@ -10,4 +10,5 @@ openai==1.59.8
 python-multipart==0.0.22
 greenlet==3.3.2
 sentence-transformers==3.0.1
+langsmith>=0.1.0
 

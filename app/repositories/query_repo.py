@@ -9,13 +9,22 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.query import LlmCallAudit, LlmCallType, QueryEvent
 from app.repositories.base import BaseRepository
 
 logger = logging.getLogger(__name__)
+
+_POLICY_REFUSAL_REASONS: frozenset[str] = frozenset(
+    {
+        "guardrail_violation",
+        "pii_blocked",
+        "no_collections",
+        "insufficient_evidence",
+    },
+)
 
 
 class QueryRepository(BaseRepository):
@@ -198,3 +207,164 @@ class QueryRepository(BaseRepository):
             float(avg_latency or 0.0),
             float(total_cost or 0.0),
         )
+
+    async def get_daily_cost(
+        self,
+        *,
+        interval_start: datetime,
+        interval_end: datetime,
+    ) -> float:
+        """
+        Sum persisted query-level AI cost for ``[interval_start, interval_end)`` (UTC).
+
+        Args:
+            interval_start: Inclusive lower bound.
+            interval_end: Exclusive upper bound.
+
+        Returns:
+            Total ``cost_usd`` from ``query_events`` in the interval.
+        """
+        stmt = select(func.coalesce(func.sum(QueryEvent.cost_usd), 0.0)).where(
+            QueryEvent.created_at >= interval_start,
+            QueryEvent.created_at < interval_end,
+        )
+        result = await self.db_session.execute(stmt)
+        return float(result.scalar_one() or 0.0)
+
+    async def get_cost_breakdown(
+        self,
+        *,
+        interval_start: datetime,
+        interval_end: datetime,
+    ) -> list[tuple[str, str, float]]:
+        """
+        Aggregate LLM audit costs by call type and model.
+
+        Args:
+            interval_start: Inclusive lower bound.
+            interval_end: Exclusive upper bound.
+
+        Returns:
+            Rows of ``(call_type, model, cost_usd_sum)``.
+        """
+        stmt = (
+            select(
+                LlmCallAudit.call_type,
+                LlmCallAudit.model,
+                func.coalesce(func.sum(LlmCallAudit.cost_usd), 0.0),
+            )
+            .where(
+                LlmCallAudit.created_at >= interval_start,
+                LlmCallAudit.created_at < interval_end,
+            )
+            .group_by(LlmCallAudit.call_type, LlmCallAudit.model)
+            .order_by(LlmCallAudit.call_type, LlmCallAudit.model)
+        )
+        result = await self.db_session.execute(stmt)
+        rows: list[tuple[str, str, float]] = []
+        for call_type, model, total in result.all():
+            ct = call_type.value if isinstance(call_type, LlmCallType) else str(call_type)
+            rows.append((ct, str(model), float(total or 0.0)))
+        return rows
+
+    async def get_top_queries(
+        self,
+        *,
+        interval_start: datetime,
+        interval_end: datetime,
+        limit: int = 10,
+    ) -> list[tuple[str, int, int]]:
+        """
+        Return the most frequent question hashes in an interval with refusal counts.
+
+        Args:
+            interval_start: Inclusive lower bound.
+            interval_end: Exclusive upper bound.
+            limit: Max number of rows.
+
+        Returns:
+            Tuples ``(question_hash, total_count, refusal_count)``.
+        """
+        stmt = (
+            select(
+                QueryEvent.question_hash,
+                func.count(QueryEvent.id).label("total_count"),
+                func.sum(func.case((QueryEvent.refused.is_(True), 1), else_=0)).label("refusal_count"),
+            )
+            .where(
+                QueryEvent.created_at >= interval_start,
+                QueryEvent.created_at < interval_end,
+            )
+            .group_by(QueryEvent.question_hash)
+            .order_by(func.count(QueryEvent.id).desc())
+            .limit(limit)
+        )
+        result = await self.db_session.execute(stmt)
+        return [(str(row[0]), int(row[1]), int(row[2] or 0)) for row in result.all()]
+
+    async def get_refusal_breakdown(
+        self,
+        *,
+        interval_start: datetime,
+        interval_end: datetime,
+    ) -> dict[str, int]:
+        """
+        Count refused queries by ``refusal_reason`` in the interval.
+
+        Args:
+            interval_start: Inclusive lower bound.
+            interval_end: Exclusive upper bound.
+
+        Returns:
+            Map of refusal reason string to count (excludes NULL reasons).
+        """
+        stmt = (
+            select(QueryEvent.refusal_reason, func.count(QueryEvent.id))
+            .where(
+                and_(
+                    QueryEvent.created_at >= interval_start,
+                    QueryEvent.created_at < interval_end,
+                    QueryEvent.refused.is_(True),
+                    QueryEvent.refusal_reason.isnot(None),
+                )
+            )
+            .group_by(QueryEvent.refusal_reason)
+        )
+        result = await self.db_session.execute(stmt)
+        breakdown: dict[str, int] = {}
+        for reason, count in result.all():
+            if reason is not None:
+                breakdown[str(reason)] = int(count)
+        return breakdown
+
+    async def get_failure_count(
+        self,
+        *,
+        interval_start: datetime,
+        interval_end: datetime,
+    ) -> int:
+        """
+        Count refused queries whose reason is not a known policy refusal.
+
+        Args:
+            interval_start: Inclusive lower bound.
+            interval_end: Exclusive upper bound.
+
+        Returns:
+            Number of events treated as failures (unexpected refusal reasons).
+        """
+        stmt = (
+            select(func.count())
+            .select_from(QueryEvent)
+            .where(
+                and_(
+                    QueryEvent.created_at >= interval_start,
+                    QueryEvent.created_at < interval_end,
+                    QueryEvent.refused.is_(True),
+                    QueryEvent.refusal_reason.isnot(None),
+                    QueryEvent.refusal_reason.notin_(_POLICY_REFUSAL_REASONS),
+                )
+            )
+        )
+        result = await self.db_session.execute(stmt)
+        return int(result.scalar_one())

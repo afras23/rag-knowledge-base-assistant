@@ -15,7 +15,14 @@ from app.api.schemas.chat import (
     ConversationMessageItemSchema,
     ConversationSummarySchema,
 )
-from app.api.schemas.common import ErrorDetail, ErrorResponse, MetricsResponse, PaginatedResponse, SuccessResponse
+from app.api.schemas.common import (
+    ErrorDetail,
+    ErrorResponse,
+    MetricsResponse,
+    PaginatedResponse,
+    SuccessResponse,
+    TopQueryItem,
+)
 
 __all__ = [
     "ChatQueryRequest",
@@ -34,4 +41,5 @@ __all__ = [
     "PaginatedResponse",
     "MetricsResponse",
     "SuccessResponse",
+    "TopQueryItem",
 ]

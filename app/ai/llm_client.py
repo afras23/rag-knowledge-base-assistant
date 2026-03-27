@@ -8,7 +8,7 @@ import asyncio
 import logging
 import random
 import time
-from contextvars import ContextVar, Token
+from contextvars import Token
 from datetime import datetime, timezone
 from typing import Any
 
@@ -24,10 +24,9 @@ from pydantic import BaseModel, Field
 
 from app.config import Settings
 from app.core.exceptions import CostLimitExceeded, GenerationError
+from app.core.middleware.correlation import correlation_id_ctx
 
 logger = logging.getLogger(__name__)
-
-correlation_id_ctx: ContextVar[str | None] = ContextVar("correlation_id", default=None)
 
 _daily_cost_by_utc_date: dict[str, float] = {}
 
@@ -93,9 +92,21 @@ class LlmClient:
             async_client: Optional injected client (tests).
         """
         self._settings = settings
-        self._client = async_client or AsyncOpenAI(api_key=settings.openai_api_key or None)
+        base_client = async_client or AsyncOpenAI(api_key=settings.openai_api_key or None)
+        self._client = self._maybe_wrap_langsmith(base_client)
         self._consecutive_failures = 0
         self._circuit_open = False
+
+    def _maybe_wrap_langsmith(self, client: AsyncOpenAI) -> AsyncOpenAI:
+        """Optionally wrap the OpenAI client for LangSmith tracing."""
+        if not self._settings.langsmith_api_key:
+            return client
+        try:
+            from langsmith.wrappers import wrap_openai
+
+            return wrap_openai(client)
+        except ImportError:
+            return client
 
     def reset_circuit_for_tests(self) -> None:
         """Reset breaker state (tests only)."""
@@ -157,6 +168,12 @@ class LlmClient:
             )
 
     def _ensure_daily_budget(self) -> None:
+        """
+        Block calls when in-process daily spend exceeds the configured limit.
+
+        Spend is accumulated in memory on each successful completion; use
+        ``QueryRepository.get_daily_cost`` for persisted totals in metrics.
+        """
         if get_daily_cost_usd() >= self._settings.max_daily_cost_usd:
             raise CostLimitExceeded(
                 "Daily LLM cost limit reached",

@@ -5,9 +5,10 @@ Application configuration loaded from environment variables.
 from __future__ import annotations
 
 import logging
+import os
 from typing import Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -106,6 +107,15 @@ class Settings(BaseSettings):
         description="Refuse LLM calls when cumulative daily spend reaches this (UTC day)",
     )
 
+    langsmith_api_key: str = Field(
+        default="",
+        description="LangSmith API key; when set, enables optional tracing (LANGSMITH_* env)",
+    )
+    langsmith_project: str = Field(
+        default="rag-knowledge-base-assistant",
+        description="LangSmith project name for traces",
+    )
+
     relevance_minimum: float = Field(
         default=0.25,
         ge=0.0,
@@ -151,6 +161,16 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
     )
+
+    @model_validator(mode="after")
+    def apply_langsmith_environment(self) -> Settings:
+        """Set LangSmith / LangChain tracing env vars when API key is configured."""
+        if self.langsmith_api_key:
+            os.environ["LANGCHAIN_TRACING_V2"] = "true"
+            os.environ["LANGCHAIN_API_KEY"] = self.langsmith_api_key
+            os.environ["LANGSMITH_API_KEY"] = self.langsmith_api_key
+            os.environ["LANGSMITH_PROJECT"] = self.langsmith_project
+        return self
 
     @field_validator("log_level", mode="before")
     @classmethod

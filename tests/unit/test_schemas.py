@@ -138,8 +138,11 @@ def test_metrics_response_rejects_negative_cost() -> None:
             avg_latency_ms=10.0,
             cost_today_usd=-1.0,
             cost_limit_usd=50.0,
+            cost_utilisation_pct=0.0,
             documents_indexed=0,
             active_collections=0,
+            top_queries=[],
+            refusal_breakdown={},
         )
 
 

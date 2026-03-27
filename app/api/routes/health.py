@@ -16,7 +16,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.schemas.common import MetricsResponse, SuccessResponse
+from app.api.schemas.common import MetricsResponse, SuccessResponse, TopQueryItem
 from app.config import settings
 from app.core.database import engine
 from app.core.dependencies import get_db_session
@@ -145,20 +145,40 @@ async def metrics(
         queries_today,
         refusals_today,
         avg_latency_ms,
-        cost_today_usd,
+        _aggregate_cost,
     ) = await query_repo.aggregate_query_metrics_for_interval(
+        interval_start=day_start,
+        interval_end=day_end,
+    )
+    cost_today_usd = await query_repo.get_daily_cost(
         interval_start=day_start,
         interval_end=day_end,
     )
     documents_indexed = await doc_repo.count_documents()
     active_collections = await doc_repo.count_distinct_collections_with_documents()
+    limit = settings.max_daily_cost_usd
+    util_pct = (cost_today_usd / limit) * 100.0 if limit > 0 else 0.0
+    util_pct = min(100.0, max(0.0, util_pct))
+    top_rows = await query_repo.get_top_queries(
+        interval_start=day_start,
+        interval_end=day_end,
+        limit=10,
+    )
+    top_queries = [TopQueryItem(question_hash=h, query_count=c, refusal_count=r) for h, c, r in top_rows]
+    refusal_breakdown = await query_repo.get_refusal_breakdown(
+        interval_start=day_start,
+        interval_end=day_end,
+    )
     payload = MetricsResponse(
         queries_today=queries_today,
         refusals_today=refusals_today,
         avg_latency_ms=avg_latency_ms,
         cost_today_usd=cost_today_usd,
-        cost_limit_usd=settings.max_daily_cost_usd,
+        cost_limit_usd=limit,
+        cost_utilisation_pct=round(util_pct, 4),
         documents_indexed=documents_indexed,
         active_collections=active_collections,
+        top_queries=top_queries,
+        refusal_breakdown=refusal_breakdown,
     )
     return SuccessResponse(status="success", data=payload, metadata={"correlation_id": cid})
