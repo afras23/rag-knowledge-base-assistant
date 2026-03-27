@@ -95,13 +95,17 @@ def create_app() -> FastAPI:
     """Create and configure the FastAPI application instance."""
     configure_root_logger(settings.log_level)
 
+    api_docs = f"{settings.api_prefix}/docs" if settings.api_prefix else "/docs"
+    api_redoc = f"{settings.api_prefix}/redoc" if settings.api_prefix else "/redoc"
+    api_openapi = f"{settings.api_prefix}/openapi.json" if settings.api_prefix else "/openapi.json"
     app = FastAPI(
         title=settings.app_name,
         version=settings.app_version,
         debug=settings.debug,
         lifespan=lifespan,
-        docs_url="/docs" if settings.debug else None,
-        redoc_url="/redoc" if settings.debug else None,
+        openapi_url=api_openapi if settings.debug else None,
+        docs_url=api_docs if settings.debug else None,
+        redoc_url=api_redoc if settings.debug else None,
     )
 
     # CORS

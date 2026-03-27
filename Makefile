@@ -1,4 +1,4 @@
-.PHONY: help dev test lint format typecheck migrate docker clean evaluate
+.PHONY: help dev test lint format typecheck migrate docker clean evaluate ui
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
@@ -6,6 +6,9 @@ help: ## Show this help
 
 dev: ## Start Docker stack
 	docker-compose up -d
+
+ui: ## Run Streamlit chat UI (set RAG_API_BASE if API is not on localhost:8000)
+	RAG_API_BASE=$${RAG_API_BASE:-http://localhost:8000/api/v1} streamlit run frontend/app.py
 
 docker: ## Build and start Docker containers
 	docker-compose up --build -d

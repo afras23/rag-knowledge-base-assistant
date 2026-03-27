@@ -7,7 +7,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from openai import APITimeoutError
+from openai import APIStatusError, APITimeoutError
 
 from app.ai.llm_client import (
     LlmCallResult,
@@ -98,6 +98,22 @@ async def test_circuit_breaker_opens() -> None:
     with pytest.raises(GenerationError) as exc_info:
         await client.complete(system_prompt="s", user_prompt="u", prompt_version="pv")
     assert "circuit" in str(exc_info.value.message).lower()
+
+
+@pytest.mark.anyio
+async def test_non_retryable_client_error_raises_generation_error() -> None:
+    """4xx errors are not retried and surface as ``GenerationError``."""
+    reset_daily_cost_for_tests()
+    settings = Settings(openai_api_key="sk-test", llm_max_retries=3)
+    mock_client = MagicMock()
+    http_response = MagicMock()
+    http_response.status_code = 400
+    client_error = APIStatusError("bad request", response=http_response, body=None)
+    mock_client.chat.completions.create = AsyncMock(side_effect=client_error)
+    client = LlmClient(settings=settings, async_client=mock_client)
+    with pytest.raises(GenerationError):
+        await client.complete(system_prompt="s", user_prompt="u", prompt_version="pv")
+    assert mock_client.chat.completions.create.await_count == 1
 
 
 @pytest.mark.anyio
