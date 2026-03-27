@@ -22,3 +22,6 @@ migrations/__pycache__/
 # Ruff / mypy
 .ruff_cache/
 .mypy_cache/
+
+# Generated evaluation reports (Phase 10)
+eval/results/*.json

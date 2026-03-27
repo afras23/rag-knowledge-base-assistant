@@ -1,0 +1,34 @@
+{
+  "docs": {
+    "policy_retention.md": {
+      "document_title": "Records Retention Policy",
+      "doc_id": "a3d7f2c1-4e9b-5d8a-9c2e-1f4b6a8d0e12",
+      "restriction_level": "public",
+      "collection_id": "default"
+    },
+    "operations_security.md": {
+      "document_title": "Operations Security Baseline",
+      "doc_id": "b4e8a3d2-5f0c-6e9b-ad3f-2a5c7b9e1f23",
+      "restriction_level": "public",
+      "collection_id": "default"
+    },
+    "hr_onboarding.md": {
+      "document_title": "Employee Onboarding Handbook",
+      "doc_id": "c5f9b4e3-6a1d-7f0c-be4a-3b6d8c0f2a34",
+      "restriction_level": "public",
+      "collection_id": "default"
+    },
+    "confidential_financial.md": {
+      "document_title": "Internal Financial Outlook",
+      "doc_id": "d6a0c5f4-7b2e-8a1d-cf5b-4c7e9d1a3b45",
+      "restriction_level": "confidential",
+      "collection_id": "default"
+    },
+    "api_reference.md": {
+      "document_title": "Knowledge API Reference",
+      "doc_id": "e7b1d6a5-8c3f-9b2e-d0c6-5d8f0e2b4c56",
+      "restriction_level": "public",
+      "collection_id": "default"
+    }
+  }
+}

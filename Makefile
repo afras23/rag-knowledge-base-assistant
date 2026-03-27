@@ -26,8 +26,8 @@ typecheck: ## Run mypy type checking
 migrate: ## Apply Alembic migrations
 	python -m alembic upgrade head
 
-evaluate: ## Run evaluation pipeline (requires later phase artifacts)
-	python scripts/evaluate.py
+evaluate: ## Run evaluation pipeline (offline retrieval + guardrails; optional --with-llm)
+	PYTHONPATH=. python scripts/evaluate.py
 
 clean: ## Remove local caches and test artifacts
 	rm -rf .mypy_cache .pytest_cache .ruff_cache htmlcov .coverage
