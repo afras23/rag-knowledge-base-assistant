@@ -106,11 +106,21 @@ class Settings(BaseSettings):
         description="Refuse LLM calls when cumulative daily spend reaches this (UTC day)",
     )
 
-    retrieval_relevance_threshold: float = Field(
+    relevance_minimum: float = Field(
         default=0.25,
         ge=0.0,
         le=1.0,
-        description="Minimum chunk relevance to count as evidence for generation",
+        description="Refuse generation when best chunk score is below this (RELEVANCE_MINIMUM)",
+    )
+    relevance_strong_threshold: float = Field(
+        default=0.55,
+        ge=0.0,
+        le=1.0,
+        description="Mark low_confidence when best score is below this but above relevance_minimum",
+    )
+    pii_policy: Literal["block", "redact", "warn"] = Field(
+        default="warn",
+        description="PII handling: block (reject), redact (mask), or warn only",
     )
     confidence_auto_approve: float = Field(
         default=0.85,

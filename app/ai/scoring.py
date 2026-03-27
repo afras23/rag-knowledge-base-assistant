@@ -30,7 +30,7 @@ def compute_confidence(
     Returns:
         Confidence score between 0 and 1.
     """
-    threshold = settings.retrieval_relevance_threshold
+    threshold = settings.relevance_minimum
     total = len(retrieved_chunks)
     if total == 0:
         return 0.0

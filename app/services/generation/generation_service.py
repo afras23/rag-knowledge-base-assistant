@@ -1,5 +1,5 @@
 """
-Grounded answer generation with citations and confidence (Phase 6).
+Grounded answer generation with citations and confidence (Phase 6–7).
 """
 
 from __future__ import annotations
@@ -12,7 +12,9 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from app.ai.guardrails import GuardrailService
 from app.ai.llm_client import LlmClient
+from app.ai.pii_detector import PiiDetector
 from app.ai.prompts.loader import get_prompt
 from app.ai.scoring import compute_confidence
 from app.api.schemas.chat import CitationSchema
@@ -32,6 +34,10 @@ class GenerationResult(BaseModel):
     confidence: float = Field(..., ge=0.0, le=1.0)
     refused: bool = Field(..., description="Whether generation was skipped or blocked")
     refusal_reason: str | None = Field(default=None)
+    low_confidence: bool = Field(
+        default=False,
+        description="True when best chunk score is below relevance_strong_threshold",
+    )
     tokens_used: int = Field(..., ge=0)
     cost_usd: float = Field(..., ge=0.0)
     latency_ms: float = Field(..., ge=0.0)
@@ -41,6 +47,24 @@ class GenerationResult(BaseModel):
 
 def _hash_question(query: str) -> str:
     return hashlib.sha256(query.encode("utf-8")).hexdigest()
+
+
+def _collection_ids_for_message(
+    chunks: list[RetrievedChunk],
+    collection_ids_searched: list[str] | None,
+) -> list[str]:
+    if collection_ids_searched is not None:
+        return sorted(collection_ids_searched)
+    return sorted({chunk.collection_id for chunk in chunks})
+
+
+def _evidence_refusal_answer(collection_ids: list[str]) -> str:
+    cols = ", ".join(collection_ids) if collection_ids else "(none)"
+    return (
+        "I don't have enough information from the retrieved documents.\n"
+        f"Searched collections: {cols}.\n"
+        "Try rephrasing with more specific terms or a narrower topic."
+    )
 
 
 def _format_chunks_for_prompt(chunks: list[RetrievedChunk]) -> str:
@@ -63,10 +87,8 @@ def _merge_question_with_history(query: str, history: list[dict[str, str]] | Non
     return f"Prior conversation:\n{prior}\n\nCurrent question:\n{query}"
 
 
-def _should_refuse_evidence(chunks: list[RetrievedChunk], threshold: float) -> bool:
-    if not chunks:
-        return True
-    return max(chunk.relevance_score for chunk in chunks) < threshold
+def _best_relevance(chunks: list[RetrievedChunk]) -> float:
+    return max((chunk.relevance_score for chunk in chunks), default=0.0)
 
 
 class GenerationService:
@@ -78,6 +100,8 @@ class GenerationService:
         llm_client: LlmClient,
         settings: Settings,
         query_repo: QueryRepository | None = None,
+        guardrail_service: GuardrailService | None = None,
+        pii_detector: PiiDetector | None = None,
     ) -> None:
         """
         Initialize generation service.
@@ -86,10 +110,14 @@ class GenerationService:
             llm_client: OpenAI client wrapper.
             settings: Application settings.
             query_repo: Optional repository for query + LLM audit rows.
+            guardrail_service: Optional injection override for tests.
+            pii_detector: Optional injection override for tests.
         """
         self._llm = llm_client
         self._settings = settings
         self._query_repo = query_repo
+        self._guardrails = guardrail_service or GuardrailService()
+        self._pii = pii_detector or PiiDetector(settings)
 
     async def generate_answer(
         self,
@@ -101,6 +129,7 @@ class GenerationService:
         correlation_id: str | None = None,
         question_hash: str | None = None,
         retrieval_strategy: str = "unknown",
+        collection_ids_searched: list[str] | None = None,
     ) -> GenerationResult:
         """
         Generate an answer grounded in retrieved chunks.
@@ -113,17 +142,24 @@ class GenerationService:
             correlation_id: Request correlation id for logs.
             question_hash: Optional stable hash; computed when omitted.
             retrieval_strategy: Strategy label for analytics.
+            collection_ids_searched: Collections scope (for refusal copy).
 
         Returns:
             Generation result including citations and confidence.
         """
         start = time.perf_counter()
         q_hash = question_hash or _hash_question(query)
-        threshold = self._settings.retrieval_relevance_threshold
+        cols = _collection_ids_for_message(retrieved_chunks, collection_ids_searched)
 
-        if _should_refuse_evidence(retrieved_chunks, threshold):
+        guard = await self._guardrails.check_input(query)
+        if not guard.is_safe:
             latency_ms = (time.perf_counter() - start) * 1000.0
-            result = self._refusal_result(reason="insufficient_evidence", latency_ms=latency_ms)
+            result = self._refusal_result(
+                reason="guardrail_violation",
+                latency_ms=latency_ms,
+                answer="This request cannot be processed due to a safety policy violation.",
+                low_confidence=False,
+            )
             await self._log_query_only(
                 query_hash=q_hash,
                 retrieval_strategy=retrieval_strategy,
@@ -133,7 +169,50 @@ class GenerationService:
             )
             return result
 
-        merged_question = _merge_question_with_history(query, conversation_history)
+        pii_scan = self._pii.scan_text(query)
+        if self._settings.pii_policy == "block" and pii_scan.has_pii:
+            latency_ms = (time.perf_counter() - start) * 1000.0
+            result = self._refusal_result(
+                reason="pii_blocked",
+                latency_ms=latency_ms,
+                answer="This request cannot be processed because it appears to contain sensitive information.",
+                low_confidence=False,
+            )
+            await self._log_query_only(
+                query_hash=q_hash,
+                retrieval_strategy=retrieval_strategy,
+                chunks=retrieved_chunks,
+                result=result,
+                correlation_id=correlation_id,
+            )
+            return result
+
+        effective_query = query.strip()
+        if self._settings.pii_policy == "redact" and pii_scan.has_pii:
+            effective_query = pii_scan.redacted_text.strip()
+
+        min_rel = self._settings.relevance_minimum
+        best = _best_relevance(retrieved_chunks)
+        if not retrieved_chunks or best < min_rel:
+            latency_ms = (time.perf_counter() - start) * 1000.0
+            result = self._refusal_result(
+                reason="insufficient_evidence",
+                latency_ms=latency_ms,
+                answer=_evidence_refusal_answer(cols),
+                low_confidence=False,
+            )
+            await self._log_query_only(
+                query_hash=q_hash,
+                retrieval_strategy=retrieval_strategy,
+                chunks=retrieved_chunks,
+                result=result,
+                correlation_id=correlation_id,
+            )
+            return result
+
+        low_confidence = best < self._settings.relevance_strong_threshold
+
+        merged_question = _merge_question_with_history(effective_query, conversation_history)
         context_text = _format_chunks_for_prompt(retrieved_chunks)
         version_key = prompt_version or "v1"
         system_prompt, user_prompt, pv = get_prompt(
@@ -169,6 +248,7 @@ class GenerationService:
             confidence=confidence,
             refused=False,
             refusal_reason=None,
+            low_confidence=low_confidence,
             tokens_used=llm.input_tokens + llm.output_tokens,
             cost_usd=llm.cost_usd,
             latency_ms=latency_ms,
@@ -192,13 +272,21 @@ class GenerationService:
         )
         return gen_result
 
-    def _refusal_result(self, *, reason: str, latency_ms: float) -> GenerationResult:
+    def _refusal_result(
+        self,
+        *,
+        reason: str,
+        latency_ms: float,
+        answer: str,
+        low_confidence: bool,
+    ) -> GenerationResult:
         return GenerationResult(
-            answer="I don't have enough information.",
+            answer=answer,
             citations=[],
             confidence=0.0,
             refused=True,
             refusal_reason=reason,
+            low_confidence=low_confidence,
             tokens_used=0,
             cost_usd=0.0,
             latency_ms=latency_ms,

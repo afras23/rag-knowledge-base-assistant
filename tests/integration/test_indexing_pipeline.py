@@ -110,6 +110,7 @@ async def test_ingestion_with_indexing_end_to_end(tmp_path: Path) -> None:
                 document_repo=document_repo,
                 chunker=DocumentChunker(chunk_size=200, chunk_overlap=50),
                 indexer=indexer,
+                settings=settings,
             )
 
             sample_path = _unique_sample_path(tmp_path)
@@ -151,6 +152,7 @@ async def test_indexing_failure_doesnt_abort_batch(tmp_path: Path) -> None:
                 document_repo=document_repo,
                 chunker=DocumentChunker(chunk_size=200, chunk_overlap=50),
                 indexer=indexer,
+                settings=settings,
             )
 
             sample_path = _unique_sample_path(tmp_path)

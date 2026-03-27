@@ -193,6 +193,7 @@ async def test_ingestion_pipeline_happy_path_and_idempotency() -> None:
                 document_repo=document_repo,
                 chunker=chunker,
                 indexer=indexer,
+                settings=settings,
             )
 
             first = await pipeline.ingest_documents(
@@ -281,6 +282,7 @@ async def test_ingestion_pipeline_embedding_failure_circuit_breaks() -> None:
                 document_repo=document_repo,
                 chunker=chunker,
                 indexer=indexer,
+                settings=settings,
             )
 
             ingest_result = await pipeline.ingest_documents(
@@ -334,6 +336,7 @@ async def test_ingestion_pipeline_malformed_file_fails_cleanly() -> None:
                 document_repo=document_repo,
                 chunker=chunker,
                 indexer=indexer,
+                settings=settings,
             )
 
             ingest_result = await pipeline.ingest_documents(

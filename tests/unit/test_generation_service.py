@@ -30,7 +30,7 @@ def _chunk(doc_id: str, title: str, score: float) -> RetrievedChunk:
 
 @pytest.mark.anyio
 async def test_generates_answer_with_citations() -> None:
-    settings = Settings(retrieval_relevance_threshold=0.1, openai_api_key="sk-test")
+    settings = Settings(relevance_minimum=0.1, openai_api_key="sk-test")
     doc_id = str(uuid4())
     chunks = [_chunk(doc_id, "Policy Manual", 0.9)]
     llm = MagicMock()
@@ -76,7 +76,7 @@ async def test_refuses_when_no_chunks() -> None:
 
 @pytest.mark.anyio
 async def test_refuses_when_low_relevance() -> None:
-    settings = Settings(retrieval_relevance_threshold=0.9)
+    settings = Settings(relevance_minimum=0.9)
     chunks = [_chunk(str(uuid4()), "Low", 0.1)]
     llm = MagicMock()
     llm.complete = AsyncMock()
@@ -93,7 +93,7 @@ async def test_refuses_when_low_relevance() -> None:
 
 @pytest.mark.anyio
 async def test_citation_matches_chunks() -> None:
-    settings = Settings(retrieval_relevance_threshold=0.1, openai_api_key="sk-test")
+    settings = Settings(relevance_minimum=0.1, openai_api_key="sk-test")
     doc_id = str(uuid4())
     chunks = [_chunk(doc_id, "Exact Title", 0.5)]
     llm = MagicMock()
@@ -122,7 +122,7 @@ async def test_citation_matches_chunks() -> None:
 @pytest.mark.anyio
 async def test_unmatched_citation_logged(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level("WARNING")
-    settings = Settings(retrieval_relevance_threshold=0.1, openai_api_key="sk-test")
+    settings = Settings(relevance_minimum=0.1, openai_api_key="sk-test")
     chunks = [_chunk(str(uuid4()), "Real Title", 0.8)]
     llm = MagicMock()
     llm.complete = AsyncMock(
@@ -148,7 +148,7 @@ async def test_unmatched_citation_logged(caplog: pytest.LogCaptureFixture) -> No
 
 @pytest.mark.anyio
 async def test_confidence_calculation() -> None:
-    settings = Settings(retrieval_relevance_threshold=0.1, openai_api_key="sk-test")
+    settings = Settings(relevance_minimum=0.1, openai_api_key="sk-test")
     doc_id = str(uuid4())
     chunks = [_chunk(doc_id, "T", 0.95), _chunk(doc_id, "T", 0.95)]
     llm = MagicMock()

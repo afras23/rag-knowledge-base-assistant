@@ -25,21 +25,21 @@ def _chunk(score: float) -> RetrievedChunk:
 
 
 def test_high_evidence_high_confidence() -> None:
-    settings = Settings(retrieval_relevance_threshold=0.2)
+    settings = Settings(relevance_minimum=0.2)
     chunks = [_chunk(0.95), _chunk(0.95)]
     conf = compute_confidence(retrieved_chunks=chunks, citations_found=2, settings=settings)
     assert conf >= 0.7
 
 
 def test_low_evidence_low_confidence() -> None:
-    settings = Settings(retrieval_relevance_threshold=0.2)
+    settings = Settings(relevance_minimum=0.2)
     chunks = [_chunk(0.1), _chunk(0.1)]
     conf = compute_confidence(retrieved_chunks=chunks, citations_found=0, settings=settings)
     assert conf < 0.5
 
 
 def test_no_citations_reduces_confidence() -> None:
-    settings = Settings(retrieval_relevance_threshold=0.2)
+    settings = Settings(relevance_minimum=0.2)
     chunks = [_chunk(0.9)]
     with_cite = compute_confidence(retrieved_chunks=chunks, citations_found=1, settings=settings)
     without = compute_confidence(retrieved_chunks=chunks, citations_found=0, settings=settings)
@@ -61,7 +61,7 @@ def test_confidence_parametrize(
     expected_min: float,
     expected_max: float,
 ) -> None:
-    settings = Settings(retrieval_relevance_threshold=0.25)
+    settings = Settings(relevance_minimum=0.25)
     chunks = [_chunk(s) for s in scores]
     conf = compute_confidence(retrieved_chunks=chunks, citations_found=citations, settings=settings)
     assert expected_min <= conf <= expected_max

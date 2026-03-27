@@ -18,6 +18,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from app.ai.pii_detector import PiiDetector
+from app.config import Settings
 from app.core.exceptions import IngestionError
 from app.models.ingestion import IngestionEventStatus, IngestionJobStatus
 from app.repositories.document_repo import DocumentRepository
@@ -60,6 +62,7 @@ class IngestionPipeline:
         document_repo: DocumentRepository,
         chunker: DocumentChunker,
         indexer: IndexingService,
+        settings: Settings,
     ) -> None:
         """
         Initialize ingestion orchestrator with explicit dependencies.
@@ -69,11 +72,14 @@ class IngestionPipeline:
             document_repo: Repository for document metadata and idempotency checks.
             chunker: Chunking service.
             indexer: Indexing service (embed + index into ChromaDB).
+            settings: Application settings (PII policy for pre-embedding scans).
         """
         self._ingestion_repo = ingestion_repo
         self._document_repo = document_repo
         self._chunker = chunker
         self._indexer = indexer
+        self._settings = settings
+        self._pii = PiiDetector(settings)
 
     async def ingest_documents(
         self,
@@ -227,6 +233,7 @@ class IngestionPipeline:
             return "skipped", existing_document.id
 
         chunk_list = self._chunker.chunk_document(parsed_document)
+        chunk_list = self._apply_pii_policy_to_chunks(chunk_list)
         created_document = await self._document_repo.create_document(
             title=source_path.stem,
             file_format=detected_format,
@@ -288,6 +295,20 @@ class IngestionPipeline:
             },
         )
         return "ingested", created_document.id
+
+    def _apply_pii_policy_to_chunks(self, chunks: list[Chunk]) -> list[Chunk]:
+        """Enforce PII policy on chunk text before embedding/indexing."""
+        updated: list[Chunk] = []
+        for chunk in chunks:
+            scan = self._pii.scan_text(chunk.text)
+            if self._settings.pii_policy == "block" and scan.has_pii:
+                raise IngestionError(
+                    "Chunk contains PII and ingestion policy is block",
+                    context={"pii_categories": scan.categories},
+                )
+            new_text = scan.redacted_text if self._settings.pii_policy == "redact" and scan.has_pii else chunk.text
+            updated.append(chunk.model_copy(update={"text": new_text}))
+        return updated
 
     @staticmethod
     def _calculate_content_hash(parsed_document: ParsedDocument) -> str:

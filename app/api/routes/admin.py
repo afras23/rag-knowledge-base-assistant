@@ -25,6 +25,7 @@ from app.api.schemas.admin import (
     IngestionJobResponse,
 )
 from app.api.schemas.common import PaginatedResponse
+from app.config import settings
 from app.core.database import async_session_factory
 from app.core.exceptions import IngestionError
 from app.repositories.document_repo import DocumentRepository
@@ -80,6 +81,7 @@ def _get_pipeline(
         document_repo=document_repo,
         chunker=DocumentChunker(),
         indexer=indexing_service,
+        settings=settings,
     )
 
 
