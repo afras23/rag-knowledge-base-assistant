@@ -155,6 +155,7 @@ def test_admin_schemas_happy_path_shapes() -> None:
         collection_id="operations",
         restriction_level="public",
         version_label="2026-03",
+        supersedes_id=None,
         superseded_by=None,
         chunk_count=10,
         ingestion_status="completed",

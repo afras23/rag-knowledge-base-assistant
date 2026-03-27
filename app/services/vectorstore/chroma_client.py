@@ -167,6 +167,101 @@ class ChromaClientWrapper:
             ) from exc
         return len(ids_to_delete)
 
+    async def update_document_superseded_metadata(
+        self,
+        *,
+        collection_name: str,
+        doc_id: str,
+        is_superseded: bool,
+    ) -> int:
+        """
+        Update ``is_superseded`` on all chunk metadatas for a document.
+
+        Returns:
+            Number of rows updated (0 when no chunks exist).
+        """
+        collection = await self.get_or_create_collection(collection_name)
+
+        def _get() -> dict[str, Any]:
+            return cast(
+                dict[str, Any],
+                collection.get(
+                    where={"doc_id": doc_id},
+                    include=["metadatas"],
+                ),
+            )
+
+        try:
+            payload = await anyio.to_thread.run_sync(_get)
+        except Exception as exc:  # noqa: BLE001
+            raise IngestionError(
+                "Failed to load chunk metadatas for supersede update",
+                context={"collection_name": collection_name, "doc_id": doc_id, "error": str(exc)},
+            ) from exc
+
+        ids = payload.get("ids") or []
+        metas = payload.get("metadatas") or []
+        if not ids:
+            return 0
+        new_metas: list[dict[str, object]] = []
+        for m in metas:
+            base: dict[str, object] = dict(m) if isinstance(m, dict) else {}
+            base["is_superseded"] = is_superseded
+            new_metas.append(base)
+
+        def _upd() -> None:
+            collection.update(ids=ids, metadatas=new_metas)
+
+        try:
+            await anyio.to_thread.run_sync(_upd)
+        except Exception as exc:  # noqa: BLE001
+            raise IngestionError(
+                "Failed to update superseded metadata in Chroma",
+                context={"collection_name": collection_name, "doc_id": doc_id, "error": str(exc)},
+            ) from exc
+        return len(ids)
+
+    async def get_document_reindex_rows(
+        self,
+        *,
+        collection_name: str,
+        doc_id: str,
+    ) -> list[tuple[str, str, dict[str, Any]]]:
+        """
+        Load (vector_id, text, metadata) for each chunk of a document for re-embedding.
+
+        Returns:
+            Aligned rows suitable for rebuilding ``Chunk`` models.
+        """
+        collection = await self.get_or_create_collection(collection_name)
+
+        def _get() -> dict[str, Any]:
+            return cast(
+                dict[str, Any],
+                collection.get(
+                    where={"doc_id": doc_id},
+                    include=["documents", "metadatas"],
+                ),
+            )
+
+        try:
+            payload = await anyio.to_thread.run_sync(_get)
+        except Exception as exc:  # noqa: BLE001
+            raise IngestionError(
+                "Failed to load document chunks from Chroma",
+                context={"collection_name": collection_name, "doc_id": doc_id, "error": str(exc)},
+            ) from exc
+
+        ids = payload.get("ids") or []
+        documents = payload.get("documents") or []
+        metadatas = payload.get("metadatas") or []
+        rows: list[tuple[str, str, dict[str, Any]]] = []
+        for cid, text, meta in zip(ids, documents, metadatas, strict=False):
+            if not isinstance(meta, dict):
+                continue
+            rows.append((str(cid), str(text or ""), meta))
+        return rows
+
     async def query(
         self,
         *,

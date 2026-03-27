@@ -94,6 +94,11 @@ def test_superseded_documents_excluded() -> None:
     assert {"is_superseded": {"$ne": True}} in filters["$and"]
 
 
+def test_superseded_included_when_flag_true() -> None:
+    filters = build_retrieval_where_filters(["ops"], user_group="consultant", include_superseded=True)
+    assert not any("is_superseded" in str(c) for c in filters["$and"])
+
+
 @pytest.mark.parametrize(
     ("query", "expected"),
     [

@@ -93,29 +93,53 @@ class DocumentRepository(BaseRepository):
     async def list_documents(
         self,
         *,
-        collection_id: str | None,
+        collection_id: str | None = None,
         page: int = 1,
         page_size: int = 20,
+        include_superseded: bool = False,
     ) -> tuple[list[Document], int]:
         """
         List documents with pagination.
+
+        Args:
+            collection_id: Optional filter by collection.
+            page: 1-indexed page.
+            page_size: Page size.
+            include_superseded: When False, rows with ``superseded_by_id`` set are omitted.
 
         Returns:
             (items, total_count)
         """
         offset = (page - 1) * page_size
+
         count_query = select(func.count()).select_from(Document)
         if collection_id:
             count_query = count_query.where(Document.collection_id == collection_id)
+        if not include_superseded:
+            count_query = count_query.where(Document.superseded_by_id.is_(None))
         total_result = await self.db_session.execute(count_query)
         total_count = int(total_result.scalar_one())
 
         query = select(Document).order_by(Document.created_at.desc()).offset(offset).limit(page_size)
         if collection_id:
             query = query.where(Document.collection_id == collection_id)
+        if not include_superseded:
+            query = query.where(Document.superseded_by_id.is_(None))
         items_result = await self.db_session.execute(query)
         items = list(items_result.scalars().all())
         return items, total_count
+
+    async def list_document_ids_for_collection(self, *, collection_id: str) -> list[UUID]:
+        """Return all document UUIDs in a collection."""
+        stmt = select(Document.id).where(Document.collection_id == collection_id)
+        result = await self.db_session.execute(stmt)
+        return [row[0] for row in result.all()]
+
+    async def list_all_document_ids(self) -> list[UUID]:
+        """Return all document UUIDs."""
+        stmt = select(Document.id)
+        result = await self.db_session.execute(stmt)
+        return [row[0] for row in result.all()]
 
     async def mark_superseded(self, *, superseded_id: UUID, supersedes_id: UUID) -> None:
         """

@@ -287,6 +287,24 @@ class CollectionNotFoundError(BaseAppError):
         )
 
 
+class CollectionNotEmptyError(BaseAppError):
+    """Raised when a collection cannot be deleted because it still has documents."""
+
+    def __init__(
+        self,
+        message: str = "Collection is not empty",
+        *,
+        context: dict[str, Any] | None = None,
+    ) -> None:
+        """Create a collection not empty error."""
+        super().__init__(
+            message,
+            status_code=409,
+            error_code="COLLECTION_NOT_EMPTY",
+            context=context,
+        )
+
+
 class ConversationNotFoundError(BaseAppError):
     """Raised when a requested conversation does not exist."""
 

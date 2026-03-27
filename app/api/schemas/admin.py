@@ -59,6 +59,10 @@ class DocumentResponse(BaseModel):
     collection_id: str = Field(..., description="Collection ID this document belongs to")
     restriction_level: str = Field(..., description="Restriction level of this document")
     version_label: str | None = Field(default=None, description="Version label")
+    supersedes_id: UUID | None = Field(
+        default=None,
+        description="UUID of the older document this one replaces, when applicable",
+    )
     superseded_by: UUID | None = Field(default=None, description="UUID of the newer document that supersedes this one")
     chunk_count: int = Field(..., ge=0, description="Number of chunks indexed in the vector store")
     ingestion_status: Literal["pending", "processing", "completed", "failed"] = Field(
@@ -87,6 +91,29 @@ class DocumentResponse(BaseModel):
             ]
         }
     )
+
+
+class CollectionCreateRequest(BaseModel):
+    """Create a logical document collection."""
+
+    id: str = Field(..., min_length=1, max_length=100, description="Stable collection key (primary id)")
+    name: str = Field(..., min_length=1, max_length=200)
+    description: str = Field(..., min_length=1)
+    allowed_roles: list[str] = Field(default_factory=list)
+
+
+class CollectionUpdateRequest(BaseModel):
+    """Update collection metadata."""
+
+    name: str = Field(..., min_length=1, max_length=200)
+    description: str = Field(..., min_length=1)
+    allowed_roles: list[str] = Field(default_factory=list)
+
+
+class DocumentSupersedeRequest(BaseModel):
+    """Link a new document as the replacement for an older one."""
+
+    new_document_id: UUID = Field(..., description="UUID of the newer document that replaces this row")
 
 
 class CollectionSchema(BaseModel):

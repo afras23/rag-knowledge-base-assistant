@@ -39,6 +39,7 @@ def build_retrieval_where_filters(
     collection_ids: list[str],
     *,
     user_group: str | None,
+    include_superseded: bool = False,
 ) -> dict[str, object]:
     """
     Build Chroma metadata ``where`` filters for access control and superseded docs.
@@ -46,14 +47,14 @@ def build_retrieval_where_filters(
     Args:
         collection_ids: Logical collection identifiers to search.
         user_group: When None, confidential documents are excluded.
+        include_superseded: When True, chunks with ``is_superseded`` metadata are not filtered out.
 
     Returns:
         Chroma-compatible metadata filter dictionary.
     """
-    clauses: list[dict[str, object]] = [
-        {"collection_id": {"$in": collection_ids}},
-        {"is_superseded": {"$ne": True}},
-    ]
+    clauses: list[dict[str, object]] = [{"collection_id": {"$in": collection_ids}}]
+    if not include_superseded:
+        clauses.append({"is_superseded": {"$ne": True}})
     if user_group is None:
         clauses.append({"restriction_level": {"$ne": "confidential"}})
     return {"$and": clauses}
@@ -183,6 +184,7 @@ class RetrievalService:
         strategy: str | None = None,
         max_chunks: int = 5,
         correlation_id: str | None = None,
+        include_superseded: bool = False,
     ) -> RetrievalResult:
         """
         Retrieve top chunks for a question across collections.
@@ -194,6 +196,7 @@ class RetrievalService:
             strategy: Optional override for ``settings.retrieval_strategy``.
             max_chunks: Maximum chunks to return.
             correlation_id: Optional id propagated to query rewrite LLM calls.
+            include_superseded: Include chunks marked superseded in metadata (default False).
 
         Returns:
             Retrieval result with chunks and telemetry.
@@ -207,7 +210,11 @@ class RetrievalService:
         rewrite_out = await self._rewriter.rewrite(query, correlation_id=correlation_id)
         effective_query = rewrite_out.effective_query
         resolved = self._resolve_strategy(strategy)
-        where_filters = build_retrieval_where_filters(collection_ids, user_group=user_group)
+        where_filters = build_retrieval_where_filters(
+            collection_ids,
+            user_group=user_group,
+            include_superseded=include_superseded,
+        )
         query_embedding = self._embedder.embed_query(effective_query)
 
         chunks = await self._run_strategy(
