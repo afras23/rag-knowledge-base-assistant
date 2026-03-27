@@ -7,7 +7,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import time
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -24,6 +24,9 @@ from app.services.generation.citation_formatter import build_citations_from_answ
 from app.services.vectorstore.chroma_client import RetrievedChunk
 
 logger = logging.getLogger(__name__)
+
+InputSafetyMode = Literal["full", "skip"]
+RelevanceGateMode = Literal["full", "skip"]
 
 
 class GenerationResult(BaseModel):
@@ -130,6 +133,8 @@ class GenerationService:
         question_hash: str | None = None,
         retrieval_strategy: str = "unknown",
         collection_ids_searched: list[str] | None = None,
+        input_safety_mode: InputSafetyMode = "full",
+        relevance_gate_mode: RelevanceGateMode = "full",
     ) -> GenerationResult:
         """
         Generate an answer grounded in retrieved chunks.
@@ -143,6 +148,8 @@ class GenerationService:
             question_hash: Optional stable hash; computed when omitted.
             retrieval_strategy: Strategy label for analytics.
             collection_ids_searched: Collections scope (for refusal copy).
+            input_safety_mode: When ``skip``, guardrails and PII checks are not run (caller verified).
+            relevance_gate_mode: When ``skip``, relevance minimum gate is not run (caller verified).
 
         Returns:
             Generation result including citations and confidence.
@@ -151,8 +158,11 @@ class GenerationService:
         q_hash = question_hash or _hash_question(query)
         cols = _collection_ids_for_message(retrieved_chunks, collection_ids_searched)
 
-        guard = await self._guardrails.check_input(query)
-        if not guard.is_safe:
+        if input_safety_mode == "full":
+            guard = await self._guardrails.check_input(query)
+        else:
+            guard = None
+        if input_safety_mode == "full" and guard is not None and not guard.is_safe:
             latency_ms = (time.perf_counter() - start) * 1000.0
             result = self._refusal_result(
                 reason="guardrail_violation",
@@ -169,8 +179,13 @@ class GenerationService:
             )
             return result
 
-        pii_scan = self._pii.scan_text(query)
-        if self._settings.pii_policy == "block" and pii_scan.has_pii:
+        pii_scan = self._pii.scan_text(query) if input_safety_mode == "full" else None
+        if (
+            input_safety_mode == "full"
+            and pii_scan is not None
+            and self._settings.pii_policy == "block"
+            and pii_scan.has_pii
+        ):
             latency_ms = (time.perf_counter() - start) * 1000.0
             result = self._refusal_result(
                 reason="pii_blocked",
@@ -188,12 +203,17 @@ class GenerationService:
             return result
 
         effective_query = query.strip()
-        if self._settings.pii_policy == "redact" and pii_scan.has_pii:
+        if (
+            input_safety_mode == "full"
+            and pii_scan is not None
+            and self._settings.pii_policy == "redact"
+            and pii_scan.has_pii
+        ):
             effective_query = pii_scan.redacted_text.strip()
 
         min_rel = self._settings.relevance_minimum
         best = _best_relevance(retrieved_chunks)
-        if not retrieved_chunks or best < min_rel:
+        if relevance_gate_mode == "full" and (not retrieved_chunks or best < min_rel):
             latency_ms = (time.perf_counter() - start) * 1000.0
             result = self._refusal_result(
                 reason="insufficient_evidence",

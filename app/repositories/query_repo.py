@@ -5,6 +5,7 @@ Repository for logging query events and LLM calls, and aggregating analytics.
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
@@ -149,3 +150,51 @@ class QueryRepository(BaseRepository):
         if db_query_event is None:
             raise LookupError(f"QueryEvent not found: {query_event_id}")
         return db_query_event
+
+    async def aggregate_query_metrics_for_interval(
+        self,
+        *,
+        interval_start: datetime,
+        interval_end: datetime,
+    ) -> tuple[int, int, float, float]:
+        """
+        Aggregate query analytics for a half-open UTC interval ``[start, end)``.
+
+        Args:
+            interval_start: Inclusive lower bound (timezone-aware UTC).
+            interval_end: Exclusive upper bound (timezone-aware UTC).
+
+        Returns:
+            Tuple of ``(query_count, refusal_count, avg_latency_ms, total_cost_usd)``.
+        """
+        base_filter = (
+            QueryEvent.created_at >= interval_start,
+            QueryEvent.created_at < interval_end,
+        )
+        count_stmt = select(func.count()).select_from(QueryEvent).where(*base_filter)
+        count_result = await self.db_session.execute(count_stmt)
+        query_count = int(count_result.scalar_one())
+
+        refusal_stmt = (
+            select(func.count())
+            .select_from(QueryEvent)
+            .where(
+                *base_filter,
+                QueryEvent.refused.is_(True),
+            )
+        )
+        refusal_result = await self.db_session.execute(refusal_stmt)
+        refusal_count = int(refusal_result.scalar_one())
+
+        agg_stmt = select(
+            func.coalesce(func.avg(QueryEvent.latency_ms), 0.0),
+            func.coalesce(func.sum(QueryEvent.cost_usd), 0.0),
+        ).where(*base_filter)
+        agg_result = await self.db_session.execute(agg_stmt)
+        avg_latency, total_cost = agg_result.one()
+        return (
+            query_count,
+            refusal_count,
+            float(avg_latency or 0.0),
+            float(total_cost or 0.0),
+        )

@@ -134,6 +134,12 @@ class Settings(BaseSettings):
         le=1.0,
         description="Confidence below this indicates weak evidence",
     )
+    conversation_context_max_messages: int = Field(
+        default=5,
+        ge=1,
+        le=50,
+        description="Max prior user+assistant message pairs to include when building LLM context",
+    )
 
     cors_allow_origins: str = Field(
         default="",

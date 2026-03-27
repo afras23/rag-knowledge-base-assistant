@@ -7,13 +7,23 @@ from app.api.schemas.admin import (
     IngestionEventResponse,
     IngestionJobResponse,
 )
-from app.api.schemas.chat import ChatQueryRequest, ChatQueryResponse, CitationSchema
-from app.api.schemas.common import ErrorDetail, ErrorResponse, MetricsResponse, PaginatedResponse
+from app.api.schemas.chat import (
+    ChatQueryRequest,
+    ChatQueryResponse,
+    CitationSchema,
+    ConversationDetailSchema,
+    ConversationMessageItemSchema,
+    ConversationSummarySchema,
+)
+from app.api.schemas.common import ErrorDetail, ErrorResponse, MetricsResponse, PaginatedResponse, SuccessResponse
 
 __all__ = [
     "ChatQueryRequest",
     "ChatQueryResponse",
     "CitationSchema",
+    "ConversationDetailSchema",
+    "ConversationMessageItemSchema",
+    "ConversationSummarySchema",
     "DocumentCreateRequest",
     "DocumentResponse",
     "CollectionSchema",
@@ -23,4 +33,5 @@ __all__ = [
     "ErrorResponse",
     "PaginatedResponse",
     "MetricsResponse",
+    "SuccessResponse",
 ]

@@ -4,6 +4,7 @@ Chat-related Pydantic schemas (query request/response and citations).
 
 from __future__ import annotations
 
+from datetime import datetime
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -42,6 +43,10 @@ class ChatQueryRequest(BaseModel):
         default=None,
         description="Optional conversation UUID to enable multi-turn context",
     )
+    user_group: str | None = Field(
+        default=None,
+        description="Optional access-control group (enables confidential retrieval when set)",
+    )
     collection_ids: list[str] | None = Field(
         default=None,
         description="Optional list of collection IDs to restrict retrieval scope",
@@ -76,6 +81,10 @@ class ChatQueryResponse(BaseModel):
     conversation_id: UUID = Field(..., description="Conversation UUID for subsequent multi-turn requests")
     refused: bool = Field(..., description="Whether the system refused instead of answering")
     refusal_reason: str | None = Field(default=None, description="Reason for refusal when refused=True")
+    low_confidence: bool = Field(
+        default=False,
+        description="True when best retrieved chunk score is below the strong relevance threshold",
+    )
     tokens_used: int = Field(..., ge=0, description="Total tokens used for all LLM calls in this request")
     cost_usd: float = Field(..., ge=0.0, description="Total USD cost for this request")
     latency_ms: float = Field(..., ge=0.0, description="End-to-end latency in milliseconds")
@@ -98,6 +107,7 @@ class ChatQueryResponse(BaseModel):
                     "conversation_id": "6c4a8f31-8d1e-4d8c-93c6-8d7df5f3f01a",
                     "refused": False,
                     "refusal_reason": None,
+                    "low_confidence": False,
                     "tokens_used": 1430,
                     "cost_usd": 0.031,
                     "latency_ms": 2450.7,
@@ -105,3 +115,34 @@ class ChatQueryResponse(BaseModel):
             ]
         }
     )
+
+
+class ConversationMessageItemSchema(BaseModel):
+    """Single persisted message in a conversation."""
+
+    id: UUID = Field(..., description="Message id")
+    role: str = Field(..., description="user or assistant")
+    content: str = Field(..., description="Message body")
+    refused: bool = Field(..., description="Whether the assistant refused")
+    created_at: datetime = Field(..., description="UTC creation time")
+
+
+class ConversationDetailSchema(BaseModel):
+    """Conversation with full message history."""
+
+    id: UUID = Field(..., description="Conversation id")
+    user_group: str | None = Field(default=None, description="Access group label when set")
+    created_at: datetime = Field(..., description="UTC creation time")
+    updated_at: datetime = Field(..., description="UTC last update time")
+    messages: list[ConversationMessageItemSchema] = Field(
+        default_factory=list,
+        description="Messages in chronological order",
+    )
+
+
+class ConversationSummarySchema(BaseModel):
+    """Conversation row for list views."""
+
+    id: UUID = Field(..., description="Conversation id")
+    created_at: datetime = Field(..., description="UTC creation time")
+    updated_at: datetime = Field(..., description="UTC last update time")

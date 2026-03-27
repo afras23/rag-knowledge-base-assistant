@@ -142,3 +142,14 @@ class DocumentRepository(BaseRepository):
         await self.db_session.execute(delete(Document).where(Document.id == document_id))
         await self.db_session.commit()
         logger.info("Deleted document", extra={"document_id": str(document_id)})
+
+    async def count_documents(self) -> int:
+        """Return total number of document rows."""
+        count_result = await self.db_session.execute(select(func.count()).select_from(Document))
+        return int(count_result.scalar_one())
+
+    async def count_distinct_collections_with_documents(self) -> int:
+        """Return how many collection ids have at least one document."""
+        stmt = select(func.count(func.distinct(Document.collection_id)))
+        result = await self.db_session.execute(stmt)
+        return int(result.scalar_one())

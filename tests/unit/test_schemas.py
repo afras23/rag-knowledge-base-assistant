@@ -134,6 +134,7 @@ def test_metrics_response_rejects_negative_cost() -> None:
     with pytest.raises(ValidationError):
         MetricsResponse(
             queries_today=1,
+            refusals_today=0,
             avg_latency_ms=10.0,
             cost_today_usd=-1.0,
             cost_limit_usd=50.0,

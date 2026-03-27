@@ -8,25 +8,22 @@ Endpoints are intentionally thin: they validate input, delegate to
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal, cast
 from uuid import UUID
 
 import anyio
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.schemas.admin import (
     IngestionEventResponse,
     IngestionJobResponse,
 )
-from app.api.schemas.common import PaginatedResponse
+from app.api.schemas.common import PaginatedResponse, SuccessResponse
 from app.config import settings
-from app.core.database import async_session_factory
+from app.core.dependencies import get_db_session
 from app.core.exceptions import IngestionError
 from app.repositories.document_repo import DocumentRepository
 from app.repositories.ingestion_repo import IngestionRepository
@@ -41,18 +38,15 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@asynccontextmanager
-async def _db_session() -> AsyncIterator[AsyncSession]:
-    """Create an async DB session for a single request."""
-    async with async_session_factory() as session:
-        yield session
+def _correlation_id(request: Request) -> str:
+    return str(getattr(request.state, "correlation_id", "") or "")
 
 
-async def _get_ingestion_repo(session: AsyncSession = Depends(_db_session)) -> IngestionRepository:
+async def _get_ingestion_repo(session: AsyncSession = Depends(get_db_session)) -> IngestionRepository:
     return IngestionRepository(session)
 
 
-async def _get_document_repo(session: AsyncSession = Depends(_db_session)) -> DocumentRepository:
+async def _get_document_repo(session: AsyncSession = Depends(get_db_session)) -> DocumentRepository:
     return DocumentRepository(session)
 
 
@@ -87,6 +81,7 @@ def _get_pipeline(
 
 @router.post("/admin/ingest", status_code=201)
 async def ingest_admin(
+    request: Request,
     collection_id: str = Form(..., description="Target collection ID"),
     restriction_level: Literal["public", "restricted", "confidential"] = Form(
         "restricted",
@@ -96,7 +91,7 @@ async def ingest_admin(
     files: list[UploadFile] | None = File(default=None),
     pipeline: IngestionPipeline = Depends(_get_pipeline),
     ingestion_repo: IngestionRepository = Depends(_get_ingestion_repo),
-) -> IngestionJobResponse:
+) -> SuccessResponse[IngestionJobResponse]:
     """
     Trigger an ingestion job from uploaded files or a directory path.
     """
@@ -136,7 +131,7 @@ async def ingest_admin(
         )
 
     job = await ingestion_repo.get_job_status(job_id=ingestion_result.job_id)
-    return IngestionJobResponse(
+    payload = IngestionJobResponse(
         job_id=job.id,
         status=cast(Literal["pending", "processing", "completed", "failed"], job.status),
         total_documents=job.total_documents,
@@ -146,20 +141,23 @@ async def ingest_admin(
         started_at=job.started_at,
         completed_at=job.completed_at,
     )
+    cid = _correlation_id(request)
+    return SuccessResponse(status="success", data=payload, metadata={"correlation_id": cid})
 
 
 @router.get("/admin/ingest/{job_id}", status_code=200)
 async def get_ingestion_job(
     job_id: UUID,
+    request: Request,
     ingestion_repo: IngestionRepository = Depends(_get_ingestion_repo),
-) -> IngestionJobResponse:
+) -> SuccessResponse[IngestionJobResponse]:
     """Return ingestion job progress."""
     try:
         job = await ingestion_repo.get_job_status(job_id=job_id)
     except LookupError:
         raise HTTPException(status_code=404, detail="Ingestion job not found") from None
 
-    return IngestionJobResponse(
+    payload = IngestionJobResponse(
         job_id=job.id,
         status=cast(Literal["pending", "processing", "completed", "failed"], job.status),
         total_documents=job.total_documents,
@@ -169,14 +167,17 @@ async def get_ingestion_job(
         started_at=job.started_at,
         completed_at=job.completed_at,
     )
+    cid = _correlation_id(request)
+    return SuccessResponse(status="success", data=payload, metadata={"correlation_id": cid})
 
 
 @router.delete("/admin/documents/{document_id}", status_code=200)
 async def delete_admin_document(
     document_id: UUID,
+    request: Request,
     document_repo: DocumentRepository = Depends(_get_document_repo),
     chroma_client: ChromaClient = Depends(_get_chroma_client),
-) -> JSONResponse:
+) -> SuccessResponse[dict[str, str | int]]:
     """Delete a document record and corresponding Chroma vectors."""
     db_document = await document_repo.get_document(document_id)
 
@@ -202,31 +203,38 @@ async def delete_admin_document(
         )
         raise HTTPException(status_code=500, detail="Document deletion failed") from exc
 
-    return JSONResponse(
-        status_code=200,
-        content={"status": "deleted", "document_id": str(document_id), "deleted_vectors": deleted_vectors},
-    )
+    cid = _correlation_id(request)
+    payload: dict[str, str | int] = {
+        "status": "deleted",
+        "document_id": str(document_id),
+        "deleted_vectors": int(deleted_vectors),
+    }
+    return SuccessResponse(status="success", data=payload, metadata={"correlation_id": cid})
 
 
 @router.post("/admin/reindex", status_code=202)
 async def reindex_admin(
+    request: Request,
     collection_id: str = Form(..., description="Collection to reindex"),
-) -> JSONResponse:
+) -> SuccessResponse[dict[str, str]]:
     """Trigger full re-ingestion for a collection (stub)."""
     logger.info(
         "Reindex requested (stub)",
         extra={"collection_id": collection_id, "timestamp": datetime.now(timezone.utc).isoformat()},
     )
-    return JSONResponse(status_code=202, content={"status": "accepted", "collection_id": collection_id})
+    cid = _correlation_id(request)
+    payload = {"status": "accepted", "collection_id": collection_id}
+    return SuccessResponse(status="success", data=payload, metadata={"correlation_id": cid})
 
 
 @router.get("/admin/ingest/{job_id}/events", status_code=200)
 async def get_ingestion_events(
     job_id: UUID,
+    request: Request,
     page: int = 1,
     page_size: int = 20,
     ingestion_repo: IngestionRepository = Depends(_get_ingestion_repo),
-) -> PaginatedResponse[IngestionEventResponse]:
+) -> SuccessResponse[PaginatedResponse[IngestionEventResponse]]:
     """Return paginated ingestion events for a job."""
     try:
         events, total_count = await ingestion_repo.list_job_events(job_id=job_id, page=page, page_size=page_size)
@@ -245,9 +253,11 @@ async def get_ingestion_events(
         for event in events
     ]
 
-    return PaginatedResponse[IngestionEventResponse](
+    page_payload = PaginatedResponse[IngestionEventResponse](
         items=items,
         total=total_count,
         page=page,
         page_size=page_size,
     )
+    cid = _correlation_id(request)
+    return SuccessResponse(status="success", data=page_payload, metadata={"correlation_id": cid})
