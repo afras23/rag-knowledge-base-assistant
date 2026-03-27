@@ -11,6 +11,7 @@ from typing import Literal, cast
 
 from pydantic import BaseModel, Field
 
+from app.ai.llm_client import LlmClient
 from app.config import Settings
 from app.services.ingestion.embedder import EmbeddingProvider
 from app.services.retrieval.query_rewriter import QueryRewriter
@@ -158,6 +159,7 @@ class RetrievalService:
         chroma_client: ChromaClientWrapper,
         embedding_provider: EmbeddingProvider,
         settings: Settings,
+        llm_client: LlmClient | None = None,
     ) -> None:
         """
         Initialize retrieval service.
@@ -166,11 +168,12 @@ class RetrievalService:
             chroma_client: Chroma wrapper for dense (and optional keyword) search.
             embedding_provider: Embeds the user query.
             settings: Application settings (strategy defaults and feature flags).
+            llm_client: Optional LLM client for query rewrite when heuristics trigger.
         """
         self._chroma = chroma_client
         self._embedder = embedding_provider
         self._settings = settings
-        self._rewriter = QueryRewriter()
+        self._rewriter = QueryRewriter(llm_client=llm_client, settings=settings)
 
     async def retrieve(
         self,
@@ -179,6 +182,7 @@ class RetrievalService:
         user_group: str | None = None,
         strategy: str | None = None,
         max_chunks: int = 5,
+        correlation_id: str | None = None,
     ) -> RetrievalResult:
         """
         Retrieve top chunks for a question across collections.
@@ -189,6 +193,7 @@ class RetrievalService:
             user_group: When None, confidential chunks are excluded.
             strategy: Optional override for ``settings.retrieval_strategy``.
             max_chunks: Maximum chunks to return.
+            correlation_id: Optional id propagated to query rewrite LLM calls.
 
         Returns:
             Retrieval result with chunks and telemetry.
@@ -199,7 +204,8 @@ class RetrievalService:
         _validate_retrieve_inputs(collection_ids, max_chunks)
 
         start = time.perf_counter()
-        effective_query = await self._rewriter.rewrite(query)
+        rewrite_out = await self._rewriter.rewrite(query, correlation_id=correlation_id)
+        effective_query = rewrite_out.effective_query
         resolved = self._resolve_strategy(strategy)
         where_filters = build_retrieval_where_filters(collection_ids, user_group=user_group)
         query_embedding = self._embedder.embed_query(effective_query)
@@ -226,8 +232,8 @@ class RetrievalService:
         return RetrievalResult(
             chunks=chunks,
             strategy_used=resolved,
-            query_rewritten=False,
-            rewritten_query=None,
+            query_rewritten=rewrite_out.was_rewritten,
+            rewritten_query=rewrite_out.rewritten_query,
             retrieval_latency_ms=latency_ms,
         )
 

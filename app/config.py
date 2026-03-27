@@ -83,6 +83,48 @@ class Settings(BaseSettings):
         description="When True, hybrid dense+keyword retrieval is allowed (env: ENABLE_HYBRID_RETRIEVAL)",
     )
 
+    llm_model: str = Field(default="gpt-4o", description="OpenAI chat model for generation and query rewrite")
+    llm_max_retries: int = Field(default=3, ge=1, le=10, description="Max retries for transient LLM failures")
+    llm_circuit_breaker_threshold: int = Field(
+        default=5,
+        ge=1,
+        description="Consecutive LLM failures before circuit opens",
+    )
+    llm_input_price_per_1m_tokens_usd: float = Field(
+        default=2.5,
+        ge=0.0,
+        description="USD per 1M input tokens for cost estimation",
+    )
+    llm_output_price_per_1m_tokens_usd: float = Field(
+        default=10.0,
+        ge=0.0,
+        description="USD per 1M output tokens for cost estimation",
+    )
+    max_daily_cost_usd: float = Field(
+        default=10.0,
+        ge=0.0,
+        description="Refuse LLM calls when cumulative daily spend reaches this (UTC day)",
+    )
+
+    retrieval_relevance_threshold: float = Field(
+        default=0.25,
+        ge=0.0,
+        le=1.0,
+        description="Minimum chunk relevance to count as evidence for generation",
+    )
+    confidence_auto_approve: float = Field(
+        default=0.85,
+        ge=0.0,
+        le=1.0,
+        description="Confidence at or above this is treated as high confidence",
+    )
+    confidence_minimum: float = Field(
+        default=0.4,
+        ge=0.0,
+        le=1.0,
+        description="Confidence below this indicates weak evidence",
+    )
+
     cors_allow_origins: str = Field(
         default="",
         description="Comma-separated list of allowed CORS origins",

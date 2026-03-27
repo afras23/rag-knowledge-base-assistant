@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.services.retrieval.query_rewriter import QueryRewriter
+from app.services.retrieval.query_rewriter import QueryRewriter, QueryRewriteResult
 from app.services.retrieval.retrieval_service import (
     RetrievalResult,
     RetrievalService,
@@ -10,6 +10,7 @@ from app.services.retrieval.retrieval_service import (
 )
 
 __all__ = [
+    "QueryRewriteResult",
     "QueryRewriter",
     "RetrievalResult",
     "RetrievalService",

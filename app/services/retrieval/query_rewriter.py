@@ -1,5 +1,5 @@
 """
-Deterministic query-rewrite triggers (Phase 5). LLM rewrite is Phase 6.
+Deterministic query-rewrite triggers plus optional LLM rewrite (Phase 5–6).
 """
 
 from __future__ import annotations
@@ -7,6 +7,10 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
+
+from app.ai.llm_client import LlmClient
+from app.ai.prompts.loader import get_prompt
+from app.config import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -29,8 +33,28 @@ class QueryRewriteAnalysis:
     reason: str | None
 
 
+@dataclass(frozen=True)
+class QueryRewriteResult:
+    """Effective query text after optional LLM rewrite."""
+
+    effective_query: str
+    was_rewritten: bool
+    rewritten_query: str | None
+
+
 class QueryRewriter:
-    """Heuristic query rewrite triggers; LLM rewrite is not yet wired."""
+    """Heuristic triggers with optional LLM-backed rewrite."""
+
+    def __init__(self, llm_client: LlmClient | None = None, settings: Settings | None = None) -> None:
+        """
+        Initialize rewriter.
+
+        Args:
+            llm_client: Optional LLM client; when omitted, rewrite is heuristic-only.
+            settings: Settings bundle (required when ``llm_client`` is set).
+        """
+        self._llm = llm_client
+        self._settings = settings
 
     def analyze(self, query: str) -> QueryRewriteAnalysis:
         """
@@ -60,23 +84,48 @@ class QueryRewriter:
 
         return QueryRewriteAnalysis(should_rewrite=False, reason=None)
 
-    async def rewrite(self, query: str) -> str:
+    async def rewrite(self, query: str, correlation_id: str | None = None) -> QueryRewriteResult:
         """
-        Return the effective query string (placeholder: always original).
+        Return the effective query string, optionally via LLM rewrite.
 
         Args:
             query: Raw user query.
+            correlation_id: Optional correlation id for LLM logging.
 
         Returns:
-            Query text to use for retrieval (unchanged until Phase 6 LLM client).
+            Effective query and rewrite flags.
         """
+        stripped = query.strip()
+        if not stripped:
+            return QueryRewriteResult(effective_query=query, was_rewritten=False, rewritten_query=None)
+
         analysis = self.analyze(query)
         if analysis.should_rewrite:
             logger.info(
                 "Query rewrite recommended by heuristic",
                 extra={"reason": analysis.reason, "word_count": len(query.split())},
             )
-        return query
+
+        if not analysis.should_rewrite:
+            return QueryRewriteResult(effective_query=stripped, was_rewritten=False, rewritten_query=None)
+
+        if self._llm is None or self._settings is None:
+            return QueryRewriteResult(effective_query=stripped, was_rewritten=False, rewritten_query=None)
+
+        system_prompt, user_prompt, pv = get_prompt("query_rewrite", "v1", question=stripped)
+        llm_result = await self._llm.complete(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            prompt_version=pv,
+            correlation_id=correlation_id,
+        )
+        candidate = (llm_result.content or "").strip() or stripped
+        changed = candidate.lower() != stripped.lower()
+        return QueryRewriteResult(
+            effective_query=candidate,
+            was_rewritten=changed,
+            rewritten_query=candidate if changed else None,
+        )
 
     @staticmethod
     def _looks_like_noun_phrase_without_verb(stripped: str, words: list[str]) -> bool:
