@@ -248,6 +248,7 @@ class IngestionPipeline:
                         "collection_id": collection_id,
                         "restriction_level": restriction_level,
                         "version_label": created_document.version_label,
+                        "is_superseded": created_document.superseded_by_id is not None,
                     }
                 )
                 for chunk in chunk_list

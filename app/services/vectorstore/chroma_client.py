@@ -103,6 +103,7 @@ class ChromaClientWrapper:
                     "page_or_section": chunk.page_or_section,
                     "chunk_index": chunk.chunk_index,
                     "version_label": chunk.version_label,
+                    "is_superseded": chunk.is_superseded,
                 }
             )
 
@@ -218,6 +219,83 @@ class ChromaClientWrapper:
                 )
             )
         return retrieved
+
+    async def query_with_embeddings(
+        self,
+        *,
+        collection_name: str,
+        query_embedding: list[float],
+        n_results: int,
+        where_filters: dict[str, object] | None,
+        where_document: dict[str, object] | None = None,
+    ) -> list[tuple[RetrievedChunk, list[float]]]:
+        """
+        Query Chroma with dense vectors and return chunk rows plus stored embeddings.
+
+        Args:
+            collection_name: Logical collection name.
+            query_embedding: Query vector.
+            n_results: Number of hits to return.
+            where_filters: Metadata filter (access control, superseded, etc.).
+            where_document: Optional Chroma ``where_document`` filter (hybrid keyword path).
+
+        Returns:
+            Parallel lists of retrieved chunks and their embedding vectors.
+
+        Raises:
+            IngestionError: If Chroma query fails.
+        """
+        collection = await self.get_or_create_collection(collection_name)
+        include_list = ["documents", "metadatas", "distances", "embeddings"]
+
+        def _query() -> dict[str, Any]:
+            kwargs: dict[str, Any] = {
+                "query_embeddings": [query_embedding],
+                "n_results": n_results,
+                "where": where_filters,
+                "include": include_list,
+            }
+            if where_document is not None:
+                kwargs["where_document"] = where_document
+            return cast(dict[str, Any], collection.query(**kwargs))
+
+        try:
+            payload = await anyio.to_thread.run_sync(_query)
+        except Exception as exc:  # noqa: BLE001
+            raise IngestionError(
+                "Chroma query failed",
+                context={"collection_name": collection_name, "error": str(exc)},
+            ) from exc
+
+        documents = (payload.get("documents") or [[]])[0]
+        metadatas = (payload.get("metadatas") or [[]])[0]
+        distances = (payload.get("distances") or [[]])[0]
+        embedding_rows = (payload.get("embeddings") or [[]])[0]
+
+        out: list[tuple[RetrievedChunk, list[float]]] = []
+        for idx, (doc_text, meta, distance) in enumerate(
+            zip(documents, metadatas, distances, strict=False),
+        ):
+            if not isinstance(meta, dict):
+                continue
+            raw_distance = float(distance) if distance is not None else 0.0
+            relevance_score = max(0.0, min(1.0, 1.0 / (1.0 + raw_distance)))
+            chunk = RetrievedChunk(
+                text=str(doc_text),
+                doc_id=str(meta.get("doc_id", "")),
+                document_title=str(meta.get("document_title", "")),
+                page_or_section=str(meta.get("page_or_section", "")),
+                relevance_score=relevance_score,
+                collection_id=str(meta.get("collection_id", "")),
+                restriction_level=str(meta.get("restriction_level", "")),
+                chunk_index=int(meta.get("chunk_index", 0)),
+            )
+            raw_emb = embedding_rows[idx] if idx < len(embedding_rows) else None
+            if raw_emb is None:
+                continue
+            vec = [float(x) for x in raw_emb]
+            out.append((chunk, vec))
+        return out
 
     async def health_check(self) -> bool:
         def _list() -> list[Any]:

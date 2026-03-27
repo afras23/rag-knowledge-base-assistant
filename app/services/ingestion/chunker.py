@@ -33,6 +33,10 @@ class Chunk(BaseModel):
     collection_id: str | None = Field(default=None, description="Logical collection identifier")
     restriction_level: str | None = Field(default=None, description="Restriction level for access control")
     version_label: str | None = Field(default=None, description="Optional document version label")
+    is_superseded: bool = Field(
+        default=False,
+        description="True when a newer document supersedes this one (excluded from default retrieval)",
+    )
 
 
 @dataclass(frozen=True)

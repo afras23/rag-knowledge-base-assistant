@@ -68,6 +68,21 @@ class Settings(BaseSettings):
     chroma_host: str = Field(default="chromadb", description="ChromaDB host (docker-compose service name by default)")
     chroma_port: int = Field(default=8000, ge=1, le=65535, description="ChromaDB port")
 
+    retrieval_strategy: Literal["similarity", "mmr", "hybrid"] = Field(
+        default="mmr",
+        description="Default retrieval strategy (ADR 002): similarity, mmr, or hybrid",
+    )
+    mmr_diversity_lambda: float = Field(
+        default=0.7,
+        ge=0.0,
+        le=1.0,
+        description="MMR diversity trade-off (lambda): higher prefers relevance over diversity",
+    )
+    enable_hybrid_retrieval: bool = Field(
+        default=False,
+        description="When True, hybrid dense+keyword retrieval is allowed (env: ENABLE_HYBRID_RETRIEVAL)",
+    )
+
     cors_allow_origins: str = Field(
         default="",
         description="Comma-separated list of allowed CORS origins",
